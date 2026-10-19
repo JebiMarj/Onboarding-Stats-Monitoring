@@ -24,6 +24,17 @@ Create a PRIVATE repo and push this folder. `private/` is ignored, so employee d
 New, Static Site, pick the repo. Build command: leave empty. Publish directory: `.`
 Every push to the main branch redeploys.
 
+## QA Stats Monitoring
+Weekly evaluations are added beside onboarding. They do not replace it.
+A VA appears on the QA sheet after training is marked complete (Training Results, final step Approved, or the profile button).
+
+In the Supabase SQL editor, after `schema.sql`, run `supabase/migrations/20261019_qa_stats.sql` once.
+The app keeps working before that file is applied. Evaluation saves start working after it is applied.
+The migration only adds columns and a new table. It does not change existing rows or existing security policies.
+
+KPI weights, the pass mark, the empty-section rule, and batch display names are settings.
+Batch ids on each VA stay the same when a batch is renamed.
+
 ## 4. First run
 Open the Render URL, sign in with Marj's email and password, then Settings, Import data file, and choose
 `private/cnr-seed-data.json`. After that, every edit saves to Supabase automatically (top bar shows Saved).
