@@ -251,7 +251,7 @@ td small { display: block; color: var(--mu); font-size: 12px; }
 .cb { height: 6px; background: var(--hv); border-radius: 99px; overflow: hidden; }
 .cb i { display: block; height: 100%; background: var(--pri); border-radius: 99px; }
 .hb { display: flex; align-items: center; gap: 12px; margin: 12px 0; }
-.hb span { width: 160px; font-size: 13px; }
+.hb span { width: 180px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hb .cb { flex: 1; height: 8px; position: relative; overflow: visible; }
 .hb .cb i { height: 100%; }
 .hb .cb u { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--tx); }
@@ -328,8 +328,21 @@ details.dx > div { padding: 0 2px 16px; }
 .hc.wn { background: var(--wnb); color: var(--wn); }
 .hc.bad { background: var(--badb); color: var(--bad); }
 .gh td { background: var(--hv); cursor: pointer; }
-.bc { cursor: pointer; }
+.bc { cursor: default; }
 .bc:hover { background: var(--hv); }
+.batchbody { cursor: pointer; }
+.batchline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; flex: 1; }
+.batchline h1 { margin: 0; }
+.inline-rename { display: flex; align-items: center; gap: 8px; flex: 1; min-width: min(100%, 280px); }
+.inline-rename input { flex: 1; min-width: 140px; }
+.rename-err { color: var(--bad); font-size: 13px; font-weight: 600; margin: 8px 0 0; flex-basis: 100%; }
+.emptyqa p { max-width: 62ch; }
+.picklist { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; max-height: 50vh; overflow: auto; }
+label.pick { display: flex; flex-direction: row; align-items: flex-start; gap: 10px; margin: 0; font-size: 14px; font-weight: 500; color: var(--tx); }
+label.pick input { width: auto; margin-top: 3px; }
+label.pick small { display: block; color: var(--mu); font-weight: 500; }
+button.g.s { display: inline-flex; align-items: center; gap: 6px; }
+button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .att { border-left: 3px solid var(--ac); padding: 8px 12px; margin-bottom: 8px; background: var(--card); border-radius: 8px; }
 
 textarea {

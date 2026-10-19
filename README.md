@@ -26,14 +26,14 @@ Every push to the main branch redeploys.
 
 ## QA Stats Monitoring
 Weekly evaluations are added beside onboarding. They do not replace it.
-A VA appears on the QA sheet after training is marked complete (Training Results, final step Approved, or the profile button).
+A VA appears on the QA sheet only after training is marked complete. If the sheet is empty, use Add VAs whose training is done, or the profile button. Existing rows are not added on their own.
 
 In the Supabase SQL editor, after `schema.sql`, run `supabase/migrations/20261019_qa_stats.sql` once.
 The app keeps working before that file is applied. Evaluation saves start working after it is applied.
 The migration only adds columns and a new table. It does not change existing rows or existing security policies.
 
 KPI weights, the pass mark, the empty-section rule, and batch display names are settings.
-Batch ids on each VA stay the same when a batch is renamed.
+Rename a batch on the Batches page or in Settings. The label is stored as `batchNames` in `public.settings`, keyed by the stable batch id. Until a name is saved, the screen shows Batch N · month, where N is the position of that id in the sorted list. Clearing a name brings that default back. A name already used by another batch is rejected. The id on each VA does not change, and the name is reloaded from Supabase with the rest of the settings.
 
 ## 4. First run
 Open the Render URL, sign in with Marj's email and password, then Settings, Import data file, and choose
