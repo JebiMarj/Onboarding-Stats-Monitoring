@@ -1,0 +1,18 @@
+# Existing Render static site. Do not add a second service.
+# Publish directory is the repo root. Leave the build command empty.
+services:
+  - type: web
+    name: cnr-va-tracker
+    runtime: static
+    staticPublishPath: .
+    pullRequestPreviewsEnabled: false
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: same-origin
+      - path: /*
+        name: X-Frame-Options
+        value: SAMEORIGIN
