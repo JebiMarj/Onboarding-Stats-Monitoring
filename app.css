@@ -187,7 +187,12 @@ input:disabled, select:disabled, textarea:disabled {
   border-color: var(--input);
 }
 .btn.ghost { background: transparent; }
-.btn:disabled { cursor: not-allowed; }
+.btn:disabled {
+  cursor: not-allowed;
+  background: var(--surface-2);
+  color: var(--faint);
+  border-color: var(--input);
+}
 .btn.small { min-height: 36px; padding: 4px 12px; font-size: 14px; }
 
 .badge {
