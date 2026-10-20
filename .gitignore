@@ -1,2 +1,6 @@
 private/
 .DS_Store
+cnr-seed-data.json
+node_modules/
+.env
+.env.*
