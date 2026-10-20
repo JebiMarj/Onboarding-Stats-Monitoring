@@ -214,23 +214,47 @@
     return va.evaluations.find(function (ev) { return ev.status === 'open'; }) || va.evaluations[va.evaluations.length - 1] || null;
   }
 
+  function formulaBlock(score) {
+    var breakdown = score.breakdown || [];
+    var included = breakdown.filter(function (row) { return row.included; });
+    var lines = included.map(function (row) {
+      return '<li>' + esc(row.label) + ' × ' + esc(Score.formatWeight(row.effectiveWeight)) + '%</li>';
+    }).join('');
+    var missing = breakdown.filter(function (row) {
+      return row.score == null && Number(row.configuredWeight) > 0;
+    }).map(function (row) { return row.label; });
+    var note = '';
+    if (score.rescaled && missing.length) {
+      note = '<p>' + esc(missing.join(', ')) + (missing.length === 1 ? ' was' : ' were') +
+        ' not entered, so the remaining weights were scaled up to 100%.</p>';
+    }
+    var pass = score.passMark == null ? '' : '<p>Pass mark: ' + esc(Score.formatWeight(score.passMark)) + '.</p>';
+    var lead = included.length
+      ? '<p class="formula-lead">Overall =</p><ul class="formula-list">' + lines + '</ul>'
+      : '<p class="formula-lead">No scored sections yet.</p>';
+    return '<div class="formula">' + lead + note + pass + '</div>';
+  }
+
   function scoreCard(ev) {
     var score = ev && ev.score;
     if (!score) {
-      return '<section class="card"><h2>Weekly score</h2><p class="hint">Save at least one section to preview the score.</p></section>';
+      return '<section class="card score-card"><h2>Weekly score</h2><p class="hint">Save at least one section to preview the score.</p></section>';
     }
     var rows = (score.breakdown || []).map(function (row) {
-      return '<tr><td>' + esc(row.label) + '</td><td>' + (row.score == null ? 'Not entered' : formatScore(row.score)) + '</td>' +
-        '<td>' + esc(Score.formatWeight(row.configuredWeight)) + '%</td><td>' + (row.included ? esc(Score.formatWeight(row.effectiveWeight)) + '%' : '—') + '</td>' +
-        '<td>' + (row.included ? formatScore(row.contribution) : '—') + '</td></tr>';
+      var scoreCell = row.score == null ? '—' : formatScore(row.score);
+      var effect = row.included ? Score.formatWeight(row.effectiveWeight) + '%' : '—';
+      var points = row.included ? formatScore(row.contribution) : '—';
+      return '<tr><th scope="row">' + esc(row.label) + '</th><td>' + esc(scoreCell) + '</td><td>' +
+        esc(Score.formatWeight(row.configuredWeight)) + '%</td><td>' + esc(effect) + '</td><td>' + esc(points) + '</td></tr>';
     }).join('');
     var verdict = score.overall == null ? 'Not enough entries yet' : (score.passed ? 'Meets the pass mark' : 'Below the pass mark');
     var kind = score.overall == null ? '' : (score.passed ? 'ok' : 'warn');
-    return '<section class="card"><p class="hint">' + (ev.status === 'closed' ? 'Recorded score' : 'Score preview') + '</p>' +
+    return '<section class="card score-card"><p class="hint">' + (ev.status === 'closed' ? 'Recorded score' : 'Score preview') + '</p>' +
       '<p class="score-num">' + (score.overall == null ? '—' : formatScore(score.overall)) + '</p>' +
       '<p><span class="badge ' + kind + '">' + esc(verdict) + '</span></p>' +
-      '<p class="formula">' + esc(Score.describeScore(score)) + '</p>' +
-      '<div class="table-wrap"><table><thead><tr><th>Section</th><th>Score</th><th>Weight</th><th>Effective</th><th>Points</th></tr></thead><tbody>' +
+      formulaBlock(score) +
+      '<div class="table-wrap"><table class="score-table"><colgroup><col class="name"><col><col><col><col></colgroup>' +
+      '<thead><tr><th scope="col">Section</th><th scope="col">Score</th><th scope="col">Weight</th><th scope="col">Eff. %</th><th scope="col">Pts</th></tr></thead><tbody>' +
       rows + '</tbody></table></div><p class="hint">A blank section is left out and the other weights are scaled to 100%. A zero stays in the formula. Coaching is not scored.</p></section>';
   }
 
