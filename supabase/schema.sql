@@ -172,6 +172,7 @@ create table public.attendance_days (
   absent boolean not null default false,
   late_minutes integer not null default 0 check (late_minutes >= 0),
   downtime_minutes integer not null default 0 check (downtime_minutes >= 0),
+  remarks text,
   created_by uuid references public.profiles (id) on delete set null,
   created_at timestamptz not null default now(),
   updated_by uuid references public.profiles (id) on delete set null,
@@ -217,15 +218,17 @@ create table public.weekly_qa (
   updated_at timestamptz not null default now()
 );
 
-create table public.weekly_wbr (
+create table public.wbr_days (
   id uuid primary key default gen_random_uuid(),
-  evaluation_id uuid not null unique references public.weekly_evaluations (id) on delete cascade,
+  va_id uuid not null references public.va_profiles (id) on delete cascade,
+  work_date date not null,
   total_leads numeric check (total_leads is null or total_leads >= 0),
   converted_leads numeric check (converted_leads is null or converted_leads >= 0),
   created_by uuid references public.profiles (id) on delete set null,
   created_at timestamptz not null default now(),
   updated_by uuid references public.profiles (id) on delete set null,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  unique (va_id, work_date)
 );
 
 create table public.weekly_competencies (
@@ -309,7 +312,7 @@ create trigger weekly_evaluations_stamp before insert or update on public.weekly
   for each row execute function public.stamp_writer();
 create trigger weekly_qa_stamp before insert or update on public.weekly_qa
   for each row execute function public.stamp_writer();
-create trigger weekly_wbr_stamp before insert or update on public.weekly_wbr
+create trigger wbr_days_stamp before insert or update on public.wbr_days
   for each row execute function public.stamp_writer();
 create trigger weekly_competencies_stamp before insert or update on public.weekly_competencies
   for each row execute function public.stamp_writer();
@@ -483,9 +486,9 @@ $$;
 create trigger weekly_qa_freeze
   before insert or update or delete on public.weekly_qa
   for each row execute function public.freeze_closed_evaluation_child();
-create trigger weekly_wbr_freeze
-  before insert or update or delete on public.weekly_wbr
-  for each row execute function public.freeze_closed_evaluation_child();
+create trigger wbr_days_freeze
+  before insert or update or delete on public.wbr_days
+  for each row execute function public.freeze_closed_attendance();
 create trigger weekly_competencies_freeze
   before insert or update or delete on public.weekly_competencies
   for each row execute function public.freeze_closed_evaluation_child();
@@ -557,7 +560,7 @@ declare
   ];
   labels jsonb := jsonb_build_object(
     'attendance', 'Attendance',
-    'conversion', 'Sales conversion',
+    'conversion', 'WBR',
     'qa', 'QA score',
     'tool_navigation', 'Tool navigation',
     'communication', 'Communication',
@@ -569,7 +572,6 @@ declare
   conversion numeric;
   qa_score numeric;
   comp public.weekly_competencies%rowtype;
-  wbr public.weekly_wbr%rowtype;
   section text;
   configured numeric;
   included_sum numeric := 0;
@@ -602,12 +604,20 @@ begin
     and a.work_date >= ev.week_start
     and a.work_date < ev.week_start + 7;
 
-  select * into wbr from public.weekly_wbr where evaluation_id = ev.id;
-  if wbr.id is null or wbr.total_leads is null or wbr.total_leads = 0 then
-    conversion := null;
-  else
-    conversion := least(100, coalesce(wbr.converted_leads, 0) / wbr.total_leads * 100);
-  end if;
+  select case
+    when coalesce(sum(d.total_leads) filter (where d.total_leads > 0), 0) = 0 then null
+    else least(
+      100,
+      coalesce(sum(d.converted_leads) filter (where d.total_leads > 0), 0)
+        / sum(d.total_leads) filter (where d.total_leads > 0)
+        * 100
+    )
+  end
+  into conversion
+  from public.wbr_days d
+  where d.va_id = ev.va_id
+    and d.work_date >= ev.week_start
+    and d.work_date < ev.week_start + 7;
 
   select q.score into qa_score from public.weekly_qa q where q.evaluation_id = ev.id;
   select * into comp from public.weekly_competencies where evaluation_id = ev.id;
@@ -839,7 +849,7 @@ declare
 begin
   foreach t in array array[
     'profiles', 'batches', 'va_profiles', 'attendance_days', 'weekly_evaluations',
-    'weekly_qa', 'weekly_wbr', 'weekly_competencies', 'coaching_sessions',
+    'weekly_qa', 'wbr_days', 'weekly_competencies', 'coaching_sessions',
     'status_history', 'app_settings'
   ]
   loop
@@ -921,15 +931,15 @@ create policy weekly_qa_delete on public.weekly_qa
   for delete to authenticated
   using (public.app_role() in ('admin', 'qa'));
 
-grant insert, update, delete on public.weekly_wbr to authenticated;
-create policy weekly_wbr_insert on public.weekly_wbr
+grant insert, update, delete on public.wbr_days to authenticated;
+create policy wbr_days_insert on public.wbr_days
   for insert to authenticated
   with check (public.app_role() in ('admin', 'onboarder'));
-create policy weekly_wbr_update on public.weekly_wbr
+create policy wbr_days_update on public.wbr_days
   for update to authenticated
   using (public.app_role() in ('admin', 'onboarder'))
   with check (public.app_role() in ('admin', 'onboarder'));
-create policy weekly_wbr_delete on public.weekly_wbr
+create policy wbr_days_delete on public.wbr_days
   for delete to authenticated
   using (public.app_role() in ('admin', 'onboarder'));
 
@@ -995,3 +1005,7 @@ comment on table public.app_settings is
   'key kpi: {passMark, weights}. Weights must sum to 100. Empty KPI sections are rescaled in compute_kpi_snapshot.';
 comment on column public.attendance_days.absent is
   'Full-day absence. Daily percent is 0. Otherwise (480 - late_minutes - downtime_minutes) / 480, floored at 0.';
+comment on column public.attendance_days.remarks is
+  'Reason for a late arrival, downtime, or a full-day absence.';
+comment on table public.wbr_days is
+  'One WBR row per VA per work day. Weekly conversion is sum(converted) / sum(total) over days in the week whose total leads are greater than zero.';

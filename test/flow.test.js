@@ -67,7 +67,7 @@ test('the weekly flow, batch ids, and role gates', () => {
     vaId: vaId, workDate: '2026-10-13', absent: false, lateMinutes: 48, downtimeMinutes: 0
   })).state;
   state = must(Model.saveAttendance(state, onboarder, {
-    vaId: vaId, workDate: '2026-10-13', absent: false, lateMinutes: 48, downtimeMinutes: 12
+    vaId: vaId, workDate: '2026-10-13', absent: false, lateMinutes: 48, downtimeMinutes: 12, remarks: 'Bus was late'
   })).state;
   const days = state.attendance.filter((row) => row.vaId === vaId);
   assert.equal(days.length, 2);
@@ -76,6 +76,7 @@ test('the weekly flow, batch ids, and role gates', () => {
   assert.equal(absent.lateMinutes, 0);
   assert.equal(Score.dailyAttendancePercent(absent), 0);
   const late = days.find((row) => row.workDate === '2026-10-13');
+  assert.equal(late.remarks, 'Bus was late');
   assert.equal(Score.dailyAttendancePercent(late), Score.dailyAttendancePercent({ lateMinutes: 48, downtimeMinutes: 12 }));
 
   assert.equal(Model.saveQa(state, onboarder, { evaluationId: week1, score: 79.99 }).error, 'Your role cannot do that.');
@@ -157,11 +158,14 @@ test('WBR, competencies, and comments feed the score and coaching does not', () 
   state = must(Model.startEvaluation(state, admin, { vaId: vaId, weekStart: '2026-10-12' })).state;
   const evaluationId = state.evaluations[0].id;
   state = must(Model.saveAttendance(state, admin, { vaId: vaId, workDate: '2026-10-12', lateMinutes: 0, downtimeMinutes: 0 })).state;
-  state = must(Model.saveWbr(state, admin, { evaluationId: evaluationId, totalLeads: 8, convertedLeads: 12 })).state;
+  state = must(Model.saveWbrDay(state, admin, { vaId: vaId, workDate: '2026-10-12', totalLeads: 8, convertedLeads: 12 })).state;
   assert.equal(Score.conversionRate(8, 12), 100);
-  state = must(Model.saveWbr(state, admin, { evaluationId: evaluationId, totalLeads: 0, convertedLeads: 3 })).state;
+  state = must(Model.saveWbrDay(state, admin, { vaId: vaId, workDate: '2026-10-12', totalLeads: 0, convertedLeads: 3 })).state;
   assert.equal(Model.computeSnapshot(state, evaluationId).breakdown.find((row) => row.key === 'conversion').score, null);
-  state = must(Model.saveWbr(state, admin, { evaluationId: evaluationId, totalLeads: 10, convertedLeads: 4 })).state;
+  state = must(Model.saveWbrDay(state, admin, { vaId: vaId, workDate: '2026-10-12', totalLeads: 10, convertedLeads: 4 })).state;
+  state = must(Model.saveWbrDay(state, admin, { vaId: vaId, workDate: '2026-10-13', totalLeads: 10, convertedLeads: 6 })).state;
+  assert.equal(Model.computeSnapshot(state, evaluationId).breakdown.find((row) => row.key === 'conversion').score, 50);
+  state = must(Model.saveWbrDay(state, admin, { vaId: vaId, workDate: '2026-10-13', totalLeads: '', convertedLeads: '' })).state;
   state = must(Model.saveQa(state, qa, { evaluationId: evaluationId, score: 90 })).state;
   state = must(Model.saveCompetencies(state, onboarder, {
     evaluationId: evaluationId,
@@ -231,6 +235,7 @@ test('the last admin cannot be demoted and a closed week is frozen', () => {
     evaluationId: evaluationId, gaps: 'Score is low.', coachingActions: 'Shadow a senior VA.'
   })).state;
   assert.equal(Model.saveAttendance(state, admin, { vaId: vaId, workDate: '2026-10-12', lateMinutes: 5 }).error, 'That day is in a closed week.');
+  assert.equal(Model.saveWbrDay(state, admin, { vaId: vaId, workDate: '2026-10-12', totalLeads: 1, convertedLeads: 1 }).error, 'That day is in a closed week.');
   assert.equal(Model.saveQa(state, qa, { evaluationId: evaluationId, score: 99 }).error, 'This week is closed and its scores cannot be changed.');
   assert.equal(Model.setManualStatus(state, onboarder, { id: vaId, status: 'Ready for endorsement' }).error, 'That status is set by closing a weekly evaluation.');
   state = must(Model.setManualStatus(state, onboarder, { id: vaId, status: 'Resigned' })).state;

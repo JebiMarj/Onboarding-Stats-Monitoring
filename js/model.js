@@ -23,7 +23,7 @@
       attendance: [],
       evaluations: [],
       qa: [],
-      wbr: [],
+      wbrDays: [],
       competencies: [],
       coaching: [],
       history: [],
@@ -138,6 +138,27 @@
     return rows[0] || null;
   }
 
+  function aggregateWbr(days) {
+    var counted = (days || []).filter(function (row) {
+      return row.totalLeads != null && row.totalLeads !== '' && Number(row.totalLeads) > 0;
+    });
+    if (!counted.length) return null;
+    var total = 0;
+    var converted = 0;
+    counted.forEach(function (row) {
+      total += Number(row.totalLeads);
+      var won = row.convertedLeads == null || row.convertedLeads === '' ? 0 : Number(row.convertedLeads);
+      converted += won;
+    });
+    return { totalLeads: total, convertedLeads: converted };
+  }
+
+  function weekWbrDays(state, vaId, weekStart) {
+    return (state.wbrDays || []).filter(function (row) {
+      return row.vaId === vaId && inWeek(row.workDate, weekStart);
+    });
+  }
+
   function computeSnapshot(state, evaluationId) {
     var ev = findEval(state, evaluationId);
     if (!ev) return null;
@@ -148,7 +169,7 @@
       return Score.dailyAttendancePercent(row);
     });
     var qa = state.qa.find(function (row) { return row.evaluationId === ev.id; });
-    var wbr = state.wbr.find(function (row) { return row.evaluationId === ev.id; });
+    var wbr = aggregateWbr(weekWbrDays(state, ev.vaId, ev.weekStart));
     var comp = state.competencies.find(function (row) { return row.evaluationId === ev.id; });
     var scores = {
       attendance: Score.weeklyAttendance(daily),
@@ -182,7 +203,7 @@
       closedAt: ev.closedAt || '',
       closedByName: personName(state, ev.closedBy),
       qa: state.qa.find(function (row) { return row.evaluationId === ev.id; }) || null,
-      wbr: state.wbr.find(function (row) { return row.evaluationId === ev.id; }) || null,
+      wbr: aggregateWbr(weekWbrDays(state, ev.vaId, ev.weekStart)),
       competencies: state.competencies.find(function (row) { return row.evaluationId === ev.id; }) || null,
       preview: preview,
       score: recorded
@@ -212,6 +233,9 @@
       endorsedAt: va.endorsedAt || '',
       endorsedByName: personName(state, va.endorsedBy),
       attendance: state.attendance
+        .filter(function (row) { return row.vaId === va.id; })
+        .sort(function (a, b) { return a.workDate < b.workDate ? -1 : 1; }),
+      wbrDays: (state.wbrDays || [])
         .filter(function (row) { return row.vaId === va.id; })
         .sort(function (a, b) { return a.workDate < b.workDate ? -1 : 1; }),
       evaluations: evaluations,
@@ -384,6 +408,7 @@
     row.absent = absent;
     row.lateMinutes = absent ? 0 : late.n;
     row.downtimeMinutes = absent ? 0 : down.n;
+    row.remarks = text(src.remarks);
     row.updatedBy = actor.id;
     if (!existing) next.attendance.push(row);
     return { ok: true, state: next, attendance: row };
@@ -482,40 +507,56 @@
     return { ok: true, state: next };
   }
 
-  function saveWbr(state, actor, input) {
-    var denied = gate(actor, 'wbr');
-    if (denied) return fail(denied);
-    var open = requireOpen(state, input && input.evaluationId);
-    if (open.error) return fail(open.error);
-    var total = input.totalLeads;
-    var converted = input.convertedLeads;
-    var totalN = total == null || total === '' ? null : Number(total);
-    var convertedN = converted == null || converted === '' ? null : Number(converted);
-    if (totalN != null && (!Number.isFinite(totalN) || totalN < 0)) {
-      return fail('Enter total leads as zero or more, or leave them blank.');
-    }
-    if (convertedN != null && (!Number.isFinite(convertedN) || convertedN < 0)) {
-      return fail('Enter converted leads as zero or more, or leave them blank.');
-    }
-    var next = clone(state);
-    var row = next.wbr.find(function (item) { return item.evaluationId === input.evaluationId; });
-    if (!row) {
-      row = { id: uid(), evaluationId: input.evaluationId };
-      next.wbr.push(row);
-    }
-    row.totalLeads = totalN;
-    row.convertedLeads = convertedN;
-    row.updatedBy = actor.id;
-    return { ok: true, state: next, wbr: row };
+  function leadCount(value, label) {
+    if (value == null || value === '') return { ok: true, n: null };
+    var n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return { ok: false, error: label };
+    return { ok: true, n: n };
   }
 
-  function deleteWbr(state, actor, input) {
+  function saveWbrDay(state, actor, input) {
     var denied = gate(actor, 'wbr');
     if (denied) return fail(denied);
-    var open = requireOpen(state, input && input.evaluationId);
-    if (open.error) return fail(open.error);
+    var src = input || {};
+    if (!findVa(state, src.vaId)) return fail('VA not found.');
+    if (!Dates.isRealDate(src.workDate)) return fail('Enter a work day.');
+    if (closedWeekCovers(state, src.vaId, src.workDate)) return fail('That day is in a closed week.');
+    var total = leadCount(src.totalLeads, 'Enter total leads as zero or more, or leave them blank.');
+    if (!total.ok) return fail(total.error);
+    var converted = leadCount(src.convertedLeads, 'Enter converted leads as zero or more, or leave them blank.');
+    if (!converted.ok) return fail(converted.error);
     var next = clone(state);
-    next.wbr = next.wbr.filter(function (row) { return row.evaluationId !== input.evaluationId; });
+    if (!next.wbrDays) next.wbrDays = [];
+    if (total.n == null && converted.n == null) {
+      next.wbrDays = next.wbrDays.filter(function (row) {
+        return !(row.vaId === src.vaId && row.workDate === src.workDate);
+      });
+      return { ok: true, state: next };
+    }
+    var existing = next.wbrDays.find(function (row) {
+      return row.vaId === src.vaId && row.workDate === src.workDate;
+    });
+    var row = existing || {
+      id: uid(),
+      vaId: src.vaId,
+      workDate: src.workDate,
+      createdBy: actor.id
+    };
+    row.totalLeads = total.n;
+    row.convertedLeads = converted.n;
+    row.updatedBy = actor.id;
+    if (!existing) next.wbrDays.push(row);
+    return { ok: true, state: next, wbrDay: row };
+  }
+
+  function deleteWbrDay(state, actor, input) {
+    var denied = gate(actor, 'wbr');
+    if (denied) return fail(denied);
+    var next = clone(state);
+    var row = (next.wbrDays || []).find(function (item) { return item.id === (input && input.id); });
+    if (!row) return fail('WBR record not found.');
+    if (closedWeekCovers(next, row.vaId, row.workDate)) return fail('That day is in a closed week.');
+    next.wbrDays = next.wbrDays.filter(function (item) { return item.id !== row.id; });
     return { ok: true, state: next };
   }
 
@@ -724,8 +765,8 @@
     nextEvaluation: nextEvaluation,
     saveQa: saveQa,
     deleteQa: deleteQa,
-    saveWbr: saveWbr,
-    deleteWbr: deleteWbr,
+    saveWbrDay: saveWbrDay,
+    deleteWbrDay: deleteWbrDay,
     saveCompetencies: saveCompetencies,
     deleteCompetencies: deleteCompetencies,
     addCoaching: addCoaching,

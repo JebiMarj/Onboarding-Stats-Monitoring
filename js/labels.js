@@ -6,7 +6,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   var SECTION_LABELS = {
     attendance: 'Attendance',
-    conversion: 'Sales conversion',
+    conversion: 'WBR',
     qa: 'QA score',
     tool_navigation: 'Tool navigation',
     communication: 'Communication',
