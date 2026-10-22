@@ -175,20 +175,20 @@ test('Postgres formula matches the JavaScript formula and RLS enforces roles', {
   expectScore(await snap(week1), { attendance: 25 });
 
   await asUser(db, onboarder, () => db.query(
-    `insert into public.weekly_wbr (evaluation_id, total_leads, converted_leads) values ($1, 10, 4)`,
-    [week1]
+    `insert into public.wbr_days (va_id, work_date, total_leads, converted_leads) values ($1, '2026-10-14', 10, 4)`,
+    [va.id]
   ));
   expectScore(await snap(week1), { attendance: 25, conversion: 40 });
 
   await asUser(db, onboarder, () => db.query(
-    `update public.weekly_wbr set total_leads = 0, converted_leads = 3 where evaluation_id = $1`,
-    [week1]
+    `update public.wbr_days set total_leads = 0, converted_leads = 3 where va_id = $1 and work_date = '2026-10-14'`,
+    [va.id]
   ));
   expectScore(await snap(week1), { attendance: 25 });
 
   await asUser(db, onboarder, () => db.query(
-    `update public.weekly_wbr set total_leads = 8, converted_leads = 12 where evaluation_id = $1`,
-    [week1]
+    `update public.wbr_days set total_leads = 8, converted_leads = 12 where va_id = $1 and work_date = '2026-10-14'`,
+    [va.id]
   ));
   expectScore(await snap(week1), { attendance: 25, conversion: 100 });
 
@@ -224,8 +224,8 @@ test('Postgres formula matches the JavaScript formula and RLS enforces roles', {
   });
 
   await asUser(db, onboarder, () => db.query(
-    `update public.weekly_wbr set total_leads = null, converted_leads = null where evaluation_id = $1`,
-    [week1]
+    `update public.wbr_days set total_leads = null, converted_leads = null where va_id = $1 and work_date = '2026-10-14'`,
+    [va.id]
   ));
   const low = await snap(week1);
   expectScore(low, {
@@ -268,6 +268,13 @@ test('Postgres formula matches the JavaScript formula and RLS enforces roles', {
   await expectThrow(
     asUser(db, onboarder, () => db.query(
       `update public.attendance_days set late_minutes = 0 where va_id = $1 and work_date = '2026-10-12'`,
+      [va.id]
+    )),
+    /That day is in a closed week/
+  );
+  await expectThrow(
+    asUser(db, onboarder, () => db.query(
+      `update public.wbr_days set total_leads = 1 where va_id = $1 and work_date = '2026-10-14'`,
       [va.id]
     )),
     /That day is in a closed week/

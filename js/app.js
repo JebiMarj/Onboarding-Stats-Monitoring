@@ -7,7 +7,6 @@
       icon: 'board',
       items: [
         ['dash', 'Board', '#/board'],
-        ['va', 'VA Directory', '#/vas'],
         ['bat', 'Batches', '#/batches']
       ]
     },
@@ -45,16 +44,31 @@
     collapse: '<path d="M5 8h14M5 12h14M8 16h8"/>',
     expand: '<path d="M5 7h14M5 12h14M5 17h14"/>'
   };
-  var TABS = [
-    ['overview', 'Overview'],
-    ['attendance', 'Daily Performance'],
-    ['qa', 'QA'],
+  var CARDS = [
+    ['attendance', 'Attendance'],
+    ['qa', 'QA score'],
     ['wbr', 'WBR'],
-    ['competencies', 'Competencies'],
-    ['coaching', 'Feedback Sessions'],
-    ['kpi', 'Weekly KPI'],
-    ['history', 'Movement History']
+    ['tool', 'Tool navigation'],
+    ['critical', 'Critical thinking'],
+    ['communication', 'Communication'],
+    ['values', 'Core values'],
+    ['feedback', 'Feedback sessions']
   ];
+  var COMP_BY_FOCUS = {
+    tool: ['toolNavigation', 'toolNavigationComment', 'Tool navigation'],
+    critical: ['criticalThinking', 'criticalThinkingComment', 'Critical thinking'],
+    communication: ['communication', 'communicationComment', 'Communication'],
+    values: ['coreValues', 'coreValuesComment', 'Core values']
+  };
+  var LEGACY_FOCUS = {
+    attendance: 'attendance',
+    qa: 'qa',
+    wbr: 'wbr',
+    competencies: 'tool',
+    coaching: 'feedback',
+    history: 'history'
+  };
+  var CSV_HEADERS = ['full_name', 'onboarding_start', 'onboarder_name', 'client_name', 'business_name', 'schedule', 'status', 'batch', 'sop_or_portfolio'];
   var COLS = ['Onboarding', 'Continue onboarding', 'Ready for endorsement', 'Endorsed'];
   var COMPS = [
     ['toolNavigation', 'toolNavigationComment', 'Tool navigation'],
@@ -132,19 +146,24 @@
       batches: 'bat', training: 'tr', 'reports-training': 'trep', qa: 'qa', settings: 'set'
     };
     if (segs[0] === 'vas' && segs[1]) {
+      var focus = params.get('focus') || LEGACY_FOCUS[params.get('tab') || ''] || '';
       return {
         key: 'prof',
         vaId: decodeURIComponent(segs[1]),
-        tab: params.get('tab') || 'overview',
+        focus: focus,
         week: params.get('week') || ''
       };
     }
-    return { key: routes[segs[0]] || 'dash', vaId: '', tab: 'overview', week: '' };
+    if (segs[0] === 'vas') return { key: 'board-redirect', vaId: '', focus: '', week: '' };
+    return { key: routes[segs[0]] || 'dash', vaId: '', focus: '', week: '' };
   }
 
-  function profileHash(id, tab, week) {
-    var hash = '#/vas/' + encodeURIComponent(id) + '?tab=' + encodeURIComponent(tab || 'overview');
-    if (week) hash += '&week=' + encodeURIComponent(week);
+  function profileHash(id, focus, week) {
+    var hash = '#/vas/' + encodeURIComponent(id);
+    var parts = [];
+    if (focus) parts.push('focus=' + encodeURIComponent(focus));
+    if (week) parts.push('week=' + encodeURIComponent(week));
+    if (parts.length) hash += '?' + parts.join('&');
     return hash;
   }
 
@@ -296,7 +315,7 @@
   }
 
   function markNav(route) {
-    var active = { dash: 'dash', va: 'va', prof: 'va', perf: 'perf', coach: 'coach', rep: 'rep', bat: 'bat', tr: 'tr', trep: 'trep', qa: 'qa', set: 'set' }[route.key];
+    var active = { dash: 'dash', prof: 'dash', perf: 'perf', coach: 'coach', rep: 'rep', bat: 'bat', tr: 'tr', trep: 'trep', qa: 'qa', set: 'set' }[route.key];
     document.querySelectorAll('#nav a[data-nav]').forEach(function (link) {
       var on = link.dataset.nav === active;
       link.classList.toggle('on', on);
@@ -383,19 +402,28 @@
           closeDrawer();
           closeModal();
           closePalette();
+          closeFloaters();
         }
       });
       document.addEventListener('click', function (event) {
         var nav = document.getElementById('nav');
-        if (!nav || nav.contains(event.target)) return;
-        closeMenus();
-        closeDrawer();
+        if (nav && !nav.contains(event.target)) {
+          closeMenus();
+          closeDrawer();
+        }
+        if (!event.target.closest || !event.target.closest('#addbox, #statuspop')) closeFloaters();
       });
       document.getElementById('mod').addEventListener('click', function (event) {
+        if (event.target.closest && event.target.closest('[data-action="csv-template"]')) {
+          event.preventDefault();
+          downloadTemplate();
+          return;
+        }
         if (event.target.id === 'mod' || (event.target.closest && event.target.closest('[data-action="cancel-modal"]'))) closeModal();
       });
       document.getElementById('mod').addEventListener('change', function (event) {
         if (event.target.id === 'batchId') toggleNewBatch();
+        if (event.target.id === 'csv-file' && event.target.files && event.target.files[0]) readCsvFile(event.target.files[0]);
       });
       document.getElementById('mod').addEventListener('submit', onModalSubmit);
       document.getElementById('pal').addEventListener('click', function (event) {
@@ -415,6 +443,10 @@
     var page = document.getElementById('page');
     if (!page || !me()) return;
     var route = readRoute();
+    if (route.key === 'board-redirect') {
+      location.replace('#/board');
+      return;
+    }
     markNav(route);
     var seq = ++renderSeq;
     page.innerHTML = banner() + '<p class="mu">Loading</p>';
@@ -423,7 +455,6 @@
       if (seq !== renderSeq) return;
       var html = '';
       if (route.key === 'dash') html = viewBoard();
-      else if (route.key === 'va') html = viewDirectory();
       else if (route.key === 'prof') html = await viewProfile(route);
       else if (route.key === 'perf') html = await viewAttendance();
       else if (route.key === 'coach') html = await viewCoaching();
@@ -434,9 +465,8 @@
       else html = await viewSettings();
       if (seq !== renderSeq) return;
       page.innerHTML = banner() + html;
-      if (route.key === 'va') filterRows();
       if (route.key === 'set') weightSumText();
-      document.querySelectorAll('form.day').forEach(updateDayPercent);
+      refreshLive();
       var renaming = document.querySelector('input[data-batch]');
       if (renaming) renaming.focus();
     } catch (err) {
@@ -444,6 +474,13 @@
       state.error = err.message || 'Something went wrong.';
       page.innerHTML = banner();
     }
+  }
+
+  function closeFloaters() {
+    var pop = document.getElementById('add-pop');
+    if (pop) pop.hidden = true;
+    var panel = document.getElementById('status-panel');
+    if (panel) panel.hidden = true;
   }
 
   function viewBoard() {
@@ -456,7 +493,16 @@
       + kpi('Continue onboarding', counts['Continue onboarding'] || 0)
       + kpi('Ready for endorsement', counts['Ready for endorsement'] || 0)
       + kpi('Endorsed', counts.Endorsed || 0);
-    var empty = cache.vas.length ? '' : '<div class="card emptyqa"><h2>No VAs yet</h2><p>Add a VA from the directory once training is complete. The board starts empty.</p><a class="btn" href="#/vas">Open VA Directory</a></div>';
+    var add = '';
+    if (can('manage_va')) {
+      add = '<div class="addbox" id="addbox"><button type="button" class="plus" id="board-add" data-action="add-menu" aria-label="Add VAs" aria-haspopup="menu" aria-controls="add-pop">+</button>'
+        + '<div class="pop" id="add-pop" role="menu" hidden>'
+        + '<button type="button" data-action="add-va">Add one VA</button>'
+        + '<button type="button" data-action="import-csv">Import CSV</button>'
+        + '<button type="button" data-action="csv-template">Download template</button>'
+        + '</div></div>';
+    }
+    var empty = cache.vas.length ? '' : '<div class="card emptyqa"><h2>No VAs yet</h2><p>' + (can('manage_va') ? 'Use + to add one VA, or import a CSV. The board starts empty.' : 'The board starts empty.') + '</p></div>';
     var cols = COLS.map(function (status) {
       var cards = cache.vas.filter(function (va) { return va.status === status; }).map(card).join('');
       return '<section class="col"><h3>' + esc(status) + ' <i class="b">' + (counts[status] || 0) + '</i></h3>'
@@ -464,7 +510,7 @@
     }).join('');
     var parked = cache.vas.filter(function (va) { return va.status === 'Resigned' || va.status === 'EOC'; });
     var parkedHtml = '<h2>Resigned and EOC</h2>' + (parked.length ? '<div class="g3">' + parked.map(card).join('') + '</div>' : '<p class="mu">No one here.</p>');
-    return '<h1>Onboarding Board</h1><p class="lead">Open a card to see that VA. Closing a week and Endorse update the stage. Dragging a card does not.</p><div class="kpis">' + chips + '</div>' + empty + '<div class="board">' + cols + '</div>' + parkedHtml;
+    return '<div class="boardhead"><div><h1>Onboarding Board</h1><p class="lead">Open a card to see that VA. Closing a week and Endorse update the stage.</p></div>' + add + '</div><div class="kpis">' + chips + '</div>' + empty + '<div class="board">' + cols + '</div>' + parkedHtml;
   }
 
   function kpi(label, value) {
@@ -474,34 +520,6 @@
   function card(va) {
     var sub = [va.clientName, va.businessName].filter(Boolean).join(' · ');
     return '<a class="pc" href="#/vas/' + encodeURIComponent(va.id) + '"><b>' + esc(va.fullName) + '</b><div class="mu sm">' + esc(sub || 'No client yet') + '</div><div class="sm">' + esc(va.batchName || '') + '</div></a>';
-  }
-
-  function viewDirectory() {
-    var add = can('manage_va') ? '<button type="button" id="add-va" data-action="add-va">+ Add VA</button>' : '';
-    var chips = ['All'].concat(CNRLabels.STATUSES).map(function (status) {
-      return '<a href="#" data-status-chip="' + esc(status) + '"' + (status === state.status ? ' class="on"' : '') + '>' + esc(status) + '</a>';
-    }).join('');
-    if (!cache.vas.length) {
-      return '<h1>VA Directory</h1><p class="lead">Onboarders can update every VA. The roster starts empty.</p><div class="bar"><span class="sp"></span>' + add + '</div><div class="card emptyqa"><h2>No VAs yet</h2><p>Add someone after training is complete. Nothing is imported for you.</p>' + (can('manage_va') ? '<button type="button" data-action="add-va">+ Add VA</button>' : '') + '</div>';
-    }
-    var rows = cache.vas.map(function (va) {
-      var q = (va.fullName + ' ' + va.clientName + ' ' + va.businessName).toLowerCase();
-      return '<tr class="cl" data-q="' + esc(q) + '" data-status="' + esc(va.status) + '" data-href="#/vas/' + encodeURIComponent(va.id) + '"><td><b>' + esc(va.fullName) + '</b></td><td>' + esc(va.clientName || '—') + '<small>' + esc(va.businessName || '') + '</small></td><td>' + esc(va.batchName || '—') + '</td><td>' + esc(va.onboarderName || '—') + '</td><td>' + badge(va.status) + '</td></tr>';
-    }).join('');
-    return '<h1>VA Directory</h1><p class="lead">Onboarders can update every VA. Search matches the name, client, or business.</p><div class="bar"><input id="va-search" value="' + esc(state.dirQuery) + '" placeholder="Search name, client, or business"><div class="chips">' + chips + '</div><span class="sp"></span>' + add + '</div><div class="card tw"><table id="va-table"><thead><tr><th>Name</th><th>Client</th><th>Batch</th><th>Onboarder</th><th>Status</th></tr></thead><tbody>' + rows + '</tbody></table><p id="va-empty" class="mu" hidden>No VAs match.</p></div>';
-  }
-
-  function filterRows() {
-    var q = (state.dirQuery || '').trim().toLowerCase();
-    var status = state.status || 'All';
-    var any = false;
-    document.querySelectorAll('#va-table tbody tr').forEach(function (row) {
-      var match = (!q || (row.dataset.q || '').indexOf(q) !== -1) && (status === 'All' || row.dataset.status === status);
-      row.hidden = !match;
-      if (match) any = true;
-    });
-    var empty = document.getElementById('va-empty');
-    if (empty) empty.hidden = any;
   }
 
   function pickEval(va, week) {
@@ -521,33 +539,64 @@
     return days;
   }
 
+  function spanFor(va, week) {
+    var ev = pickEval(va, week);
+    if (ev) return ev;
+    var monday = CNRDates.mondayOf(week) || CNRDates.mondayOf(va.onboardingStart) || CNRDates.mondayOf(CNRDates.todayISO());
+    return { id: '', weekStart: monday, weekEnd: CNRDates.addDays(monday, 6), status: '' };
+  }
+
   function dayLocked(va, date) {
     return (va.evaluations || []).some(function (ev) {
       return ev.status === 'closed' && date >= ev.weekStart && date <= ev.weekEnd;
     });
   }
 
-  function weekAttendance(va, ev) {
-    if (!ev) return null;
+  function weekAttendance(va, span) {
+    if (!span) return null;
     var days = (va.attendance || []).filter(function (row) {
-      return row.workDate >= ev.weekStart && row.workDate <= ev.weekEnd;
+      return row.workDate >= span.weekStart && row.workDate <= span.weekEnd;
     });
     if (!days.length) return null;
     return CNRScore.weeklyAttendance(days.map(CNRScore.dailyAttendancePercent));
   }
 
-  function compAverage(comp) {
-    if (!comp) return null;
-    var nums = COMPS.map(function (item) { return comp[item[0]]; }).filter(function (n) { return n != null && n !== ''; });
-    if (!nums.length) return null;
-    return nums.reduce(function (sum, n) { return sum + Number(n); }, 0) / nums.length;
+  function weekConversion(va, span) {
+    var days = (va.wbrDays || []).filter(function (row) {
+      return row.workDate >= span.weekStart && row.workDate <= span.weekEnd;
+    });
+    var total = 0;
+    var converted = 0;
+    var any = false;
+    days.forEach(function (row) {
+      if (row.totalLeads == null || Number(row.totalLeads) <= 0) return;
+      any = true;
+      total += Number(row.totalLeads);
+      converted += row.convertedLeads == null ? 0 : Number(row.convertedLeads);
+    });
+    if (!any) return null;
+    return CNRScore.conversionRate(total, converted);
   }
 
-  function sopHtml(value) {
-    var text = String(value || '').trim();
-    if (!text) return '<p class="mu">No SOP or portfolio yet.</p>';
-    if (/^https?:\/\//i.test(text)) return '<p><a href="' + esc(text) + '" target="_blank" rel="noopener">' + esc(text) + '</a></p>';
-    return '<pre>' + esc(text) + '</pre>';
+  function compValue(ev, key) {
+    if (!ev || !ev.competencies) return null;
+    var value = ev.competencies[key];
+    return value == null || value === '' ? null : value;
+  }
+
+  function feedbackBits(va) {
+    var list = va.coaching || [];
+    if (!list.length) return { value: '0', sub: 'No sessions' };
+    return { value: String(list.length), sub: CNRDates.formatLong(list[0].sessionDate) };
+  }
+
+  function qaClass(score) {
+    if (score == null || score === '' || !Number.isFinite(Number(score))) return '';
+    return Number(score) >= 80 ? 'ok' : 'bad';
+  }
+
+  function summaryCard(focus, label, value, sub, tone, selected) {
+    return '<button type="button" class="scard' + (selected ? ' on' : '') + (tone ? ' ' + tone : '') + '" id="card-' + focus + '" data-focus="' + focus + '" data-action="open-card" aria-pressed="' + (selected ? 'true' : 'false') + '"><small>' + esc(label) + '</small><b>' + esc(value) + '</b>' + (sub ? '<span class="sub">' + esc(sub) + '</span>' : '') + '</button>';
   }
 
   function weekPicker(va, ev) {
@@ -564,127 +613,136 @@
     return '<form id="start-week" class="card"><h2>Start weekly evaluation</h2><p class="mu">Weeks run Monday through Sunday. A date mid-week snaps back to that Monday.</p><label class="field">Week of<input id="week-start" type="date" required value="' + esc(monday) + '"></label><div class="actions"><button type="submit">Start weekly evaluation</button></div></form>';
   }
 
-  function profileHead(va, route, ev) {
-    var tabs = TABS.map(function (tab) {
-      var on = tab[0] === route.tab ? ' class="on"' : '';
-      return '<a href="' + profileHash(va.id, tab[0], ev ? ev.weekStart : '') + '"' + on + '>' + esc(tab[1]) + '</a>';
+  function statusForm(va) {
+    var allowed = me().role === 'admin' ? CNRModel.MANUAL_ADMIN : CNRModel.MANUAL_ONBOARDER;
+    var options = allowed.map(function (status) {
+      return '<option' + (status === va.status ? ' selected' : '') + '>' + esc(status) + '</option>';
     }).join('');
+    return '<form id="status-form"><label class="field">Status<select id="manual-status">' + options + '</select></label><button type="submit" class="g">Update status</button><p class="mu sm">Ready for endorsement and Continue onboarding come from closing a week. Endorsed comes only from Endorse.</p></form>';
+  }
+
+  function profileHead(va, ev) {
     var edit = can('manage_va') ? '<button type="button" class="g s" data-action="edit-va">Edit</button>' : '';
-    return '<p class="back"><a href="#/vas">← VA Directory</a></p><div class="sheethead"><h1><span class="av">' + esc(initials(va.fullName)) + '</span>' + esc(va.fullName) + ' ' + badge(va.status) + edit + '</h1><p class="lead">' + esc([va.clientName, va.businessName, va.batchName].filter(Boolean).join(' · ') || 'No client yet') + '</p></div><nav class="tabs">' + tabs + '</nav><div class="sheetnav">' + weekPicker(va, ev) + '</div>';
+    var menu = '';
+    if (can('manage_va')) {
+      menu = '<div class="statuspop" id="statuspop"><button type="button" class="g" id="status-menu" data-action="toggle-status" aria-haspopup="true" aria-expanded="false">Status</button><div class="pop" id="status-panel" hidden>' + statusForm(va) + '<button type="button" class="g" data-action="show-history">Movement history</button></div></div>';
+    }
+    return '<p class="back"><a href="#/board">← Board</a></p><div class="sheethead"><div class="headrow"><h1><span class="av">' + esc(initials(va.fullName)) + '</span>' + esc(va.fullName) + ' ' + badge(va.status) + '</h1><div class="head-actions">' + edit + menu + '</div></div><p class="lead">' + esc([va.clientName, va.businessName, va.batchName].filter(Boolean).join(' · ') || 'No client yet') + '</p>' + weekPicker(va, ev) + '</div>';
   }
 
   async function viewProfile(route) {
     var va = await CNRStore.getVa(route.vaId);
     cache.current = va;
-    var tab = TABS.some(function (item) { return item[0] === route.tab; }) ? route.tab : 'overview';
-    route.tab = tab;
     var ev = pickEval(va, route.week);
-    var head = profileHead(va, route, ev);
-    if (!ev && tab !== 'coaching' && tab !== 'history' && tab !== 'overview') {
-      return head + startForm(CNRDates.mondayOf(va.onboardingStart) || CNRDates.mondayOf(CNRDates.todayISO()));
-    }
-    if (tab === 'overview') return head + overviewTab(va, ev);
-    if (tab === 'attendance') return head + attendanceTab(va, ev);
-    if (tab === 'qa') return head + qaTab(va, ev);
-    if (tab === 'wbr') return head + wbrTab(va, ev);
-    if (tab === 'competencies') return head + compTab(va, ev);
-    if (tab === 'coaching') return head + coachTab(va);
-    if (tab === 'kpi') return head + await kpiTab(va, ev);
-    return head + historyTab(va);
-  }
-
-  function statusForm(va) {
-    if (!can('manage_va')) return '';
-    var allowed = me().role === 'admin' ? CNRModel.MANUAL_ADMIN : CNRModel.MANUAL_ONBOARDER;
-    var options = allowed.map(function (status) {
-      return '<option' + (status === va.status ? ' selected' : '') + '>' + esc(status) + '</option>';
+    var span = spanFor(va, route.week);
+    var focus = route.focus;
+    var qaScore = ev && ev.qa ? ev.qa.score : null;
+    var bits = feedbackBits(va);
+    var cards = CARDS.map(function (item) {
+      var key = item[0];
+      var value = '—';
+      var sub = '';
+      var tone = '';
+      if (key === 'attendance') value = pct(weekAttendance(va, span));
+      else if (key === 'qa') {
+        value = points(qaScore);
+        tone = qaClass(qaScore);
+      } else if (key === 'wbr') value = pct(weekConversion(va, span));
+      else if (key === 'feedback') {
+        value = bits.value;
+        sub = bits.sub;
+      } else if (COMP_BY_FOCUS[key]) value = points(compValue(ev, COMP_BY_FOCUS[key][0]));
+      return summaryCard(key, item[1], value, sub, tone, focus === key);
     }).join('');
-    return '<form id="status-form" class="actions"><label class="field">Status<select id="manual-status">' + options + '</select></label><button type="submit" class="g">Update status</button></form><p class="mu sm">Ready for endorsement and Continue onboarding come from closing a week. Endorsed comes only from Endorse. An onboarder can set Onboarding, Resigned, or EOC.</p>';
+    return profileHead(va, ev) + '<div class="scards">' + cards + '</div><div id="detail">' + detailFor(va, ev, span, focus) + '</div>' + await kpiSection(va, ev);
   }
 
-  function overviewTab(va, ev) {
-    var conv = ev && ev.wbr ? CNRScore.conversionRate(ev.wbr.totalLeads, ev.wbr.convertedLeads) : null;
-    var overall = ev && ev.score ? ev.score.overall : null;
-    var cards = '<div class="grid4">'
-      + stat('Attendance this week', pct(weekAttendance(va, ev)))
-      + stat('QA score', points(ev && ev.qa ? ev.qa.score : null))
-      + stat('Sales conversion', conv == null ? '—' : pct(conv))
-      + stat('Competencies', points(compAverage(ev && ev.competencies)))
-      + stat('Weekly KPI', points(overall))
-      + '</div>';
-    var endorse = '';
-    if (va.status === 'Endorsed') {
-      endorse = '<p>Endorsed' + (va.endorsedByName ? ' by ' + esc(va.endorsedByName) : '') + (va.endorsedAt ? ' on ' + esc(String(va.endorsedAt).slice(0, 10)) : '') + '.</p>';
-    } else if (va.status === 'Ready for endorsement' && can('endorse')) {
-      endorse = '<button type="button" data-action="endorse">Endorse</button>';
-    } else if (va.status === 'Ready for endorsement') {
-      endorse = '<p>An admin uses Endorse on the Weekly KPI tab.</p>';
-    }
-    var start = ev ? '' : startForm(CNRDates.mondayOf(va.onboardingStart) || CNRDates.mondayOf(CNRDates.todayISO()));
-    return cards + '<div class="row"><div class="card"><h2>Details</h2><div class="hd"><div><small>Onboarding start</small>' + esc(CNRDates.formatLong(va.onboardingStart)) + '</div><div><small>Onboarder</small>' + esc(va.onboarderName || '—') + '</div><div><small>Schedule</small>' + esc(va.schedule || '—') + '</div><div><small>Batch</small>' + esc(va.batchName || '—') + '</div></div>' + statusForm(va) + '</div><div class="card"><h2>SOP or portfolio</h2>' + sopHtml(va.sopOrPortfolio) + '</div></div><div class="card"><h2>Endorsement</h2>' + (endorse || '<p class="mu">Endorse is available after a passing week is closed.</p>') + '</div>' + start;
+  function detailFor(va, ev, span, focus) {
+    if (focus === 'attendance') return attendanceDetail(va, span);
+    if (focus === 'qa') return qaDetail(va, ev);
+    if (focus === 'wbr') return wbrDetail(va, span);
+    if (COMP_BY_FOCUS[focus]) return compDetail(va, ev, focus);
+    if (focus === 'feedback') return coachTab(va);
+    if (focus === 'history') return historyTab(va);
+    return '';
   }
 
-  function stat(label, value) {
-    return '<div class="stat"><small>' + esc(label) + '</small><b>' + esc(value) + '</b></div>';
+  function needWeek() {
+    return '<div class="card"><p class="mu">Start the weekly evaluation below, then come back to this card.</p></div>';
   }
 
-  function attendanceTab(va, ev) {
+  function attendanceDetail(va, span) {
     var byDate = {};
     (va.attendance || []).forEach(function (row) { byDate[row.workDate] = row; });
     var editable = can('attendance');
-    var days = weekDates(ev.weekStart).map(function (date) {
+    var days = weekDates(span.weekStart).map(function (date) {
       var row = byDate[date] || null;
       var locked = dayLocked(va, date) || !editable;
       var absent = row ? row.absent : false;
       var late = row ? field(row.lateMinutes) : '';
       var down = row ? field(row.downtimeMinutes) : '';
+      var remarks = row ? row.remarks || '' : '';
       var shown = row ? pct(CNRScore.dailyAttendancePercent(row)) : '—';
       var save = locked ? '' : '<button type="submit" class="s">Save</button>';
       var remove = row && !locked ? '<button type="button" class="g s" data-action="delete-attendance" data-id="' + esc(row.id) + '">Remove</button>' : '';
-      return '<form class="day" data-form="attendance" data-date="' + esc(date) + '" data-locked="' + (locked ? '1' : '0') + '"><div><b>' + esc(CNRDates.formatWeekday(date)) + '</b><small>' + esc(CNRDates.formatLong(date)) + '</small></div><label>Absent <input type="checkbox" name="absent"' + (absent ? ' checked' : '') + (locked ? ' disabled' : '') + '></label><label class="field">Late min<input name="late" inputmode="numeric" value="' + esc(absent ? '0' : late) + '"' + (locked || absent ? ' disabled' : '') + '></label><label class="field">Downtime<input name="down" inputmode="numeric" value="' + esc(absent ? '0' : down) + '"' + (locked || absent ? ' disabled' : '') + '></label><b data-pct>' + esc(shown) + '</b><div class="actions">' + save + remove + '</div></form>';
+      return '<form class="day" data-form="attendance" data-date="' + esc(date) + '" data-locked="' + (locked ? '1' : '0') + '" data-saved="' + (row ? '1' : '0') + '"><div><b>' + esc(CNRDates.formatWeekday(date)) + '</b><small>' + esc(CNRDates.formatLong(date)) + '</small></div><label>Absent <input type="checkbox" name="absent"' + (absent ? ' checked' : '') + (locked ? ' disabled' : '') + '></label><label class="field">Late min<input name="late" inputmode="numeric" value="' + esc(absent ? '0' : late) + '"' + (locked || absent ? ' disabled' : '') + '></label><label class="field">Downtime<input name="down" inputmode="numeric" value="' + esc(absent ? '0' : down) + '"' + (locked || absent ? ' disabled' : '') + '></label><label class="field">Remarks<input name="remarks" value="' + esc(remarks) + '" placeholder="Late, downtime, or absent"' + (locked ? ' disabled' : '') + '></label><b data-pct>' + esc(shown) + '</b><div class="actions">' + save + remove + '</div></form>';
     }).join('');
-    return '<div class="card"><h2>Daily attendance</h2><p class="mu">One row per work day. A full day absent is 0%. Otherwise the day is (480 − late minutes − downtime minutes) / 480. Weekly attendance averages the days you save.</p></div><div class="days">' + days + '</div><p class="scoreline">Week average ' + esc(pct(weekAttendance(va, ev))) + '</p>';
+    return '<div class="card"><h2>Attendance</h2><p class="mu">Each day: absent, late minutes, downtime minutes, and a remark. Eight hours is 480 minutes and 100%. Late and downtime deduct in proportion. A full-day absence is 0%. The card averages the days in this week.</p></div><div class="days">' + days + '</div>';
   }
 
-  function qaTab(va, ev) {
+  function qaDetail(va, ev) {
+    if (!ev) return needWeek();
     var qa = ev.qa || {};
     var locked = ev.status === 'closed' || !can('qa');
     var dis = locked ? ' disabled' : '';
     var save = locked ? '' : '<button type="submit">Save QA</button>';
     var remove = ev.qa && !locked ? '<button type="button" class="g" data-action="delete-qa" data-id="' + esc(ev.id) + '">Remove QA</button>' : '';
-    var note = can('qa') ? '' : '<p class="mu">QA enters the score and the links.</p>';
+    var note = can('qa') ? '<p class="mu">80 or above passes and shows green. 79 or below fails and shows red.</p>' : '<p class="mu">QA enters the score and the links.</p>';
     if (ev.status === 'closed') note = '<p class="mu">This week is closed.</p>';
-    return '<form id="qa-form" class="card"><h2>Weekly QA</h2>' + note + '<div class="fields"><label>QA score<input id="qa-score" inputmode="decimal" value="' + esc(field(qa.score)) + '"' + dis + '></label><label>Evaluation form link<input id="qa-form-url" placeholder="https://" value="' + esc(qa.formUrl || '') + '"' + dis + '></label><label>Call recording link<input id="qa-recording" placeholder="https://" value="' + esc(qa.recordingUrl || '') + '"' + dis + '></label></div><div class="actions">' + save + remove + '</div></form>';
+    var tone = qaClass(qa.score);
+    var flag = tone === 'ok' ? '<p id="qa-flag" class="qa-pass">Pass · 80 or above</p>' : tone === 'bad' ? '<p id="qa-flag" class="qa-fail">Fail · below 80</p>' : '<p id="qa-flag" class="mu"></p>';
+    return '<form id="qa-form" class="card"><h2>QA score</h2>' + note + '<div class="fields"><label>QA score<input id="qa-score" inputmode="decimal" value="' + esc(field(qa.score)) + '"' + dis + '></label><label>Evaluation form link<input id="qa-form-url" placeholder="https://" value="' + esc(qa.formUrl || '') + '"' + dis + '></label><label>Call recording link<input id="qa-recording" placeholder="https://" value="' + esc(qa.recordingUrl || '') + '"' + dis + '></label></div>' + flag + '<div class="actions">' + save + remove + '</div></form>';
   }
 
-  function wbrTab(va, ev) {
-    var wbr = ev.wbr || {};
-    var locked = ev.status === 'closed' || !can('wbr');
-    var dis = locked ? ' disabled' : '';
-    var rate = ev.wbr ? CNRScore.conversionRate(wbr.totalLeads, wbr.convertedLeads) : null;
-    var save = locked ? '' : '<button type="submit">Save WBR</button>';
-    var remove = ev.wbr && !locked ? '<button type="button" class="g" data-action="delete-wbr" data-id="' + esc(ev.id) + '">Remove WBR</button>' : '';
-    var note = ev.status === 'closed' ? '<p class="mu">This week is closed.</p>' : '<p class="mu">Conversion is converted ÷ total, capped at 100. A blank or zero total is N/A and drops out of the KPI.</p>';
-    return '<form id="wbr-form" class="card"><h2>Weekly WBR</h2>' + note + '<div class="fields"><label>Total leads<input id="wbr-total" inputmode="numeric" value="' + esc(field(wbr.totalLeads)) + '"' + dis + '></label><label>Converted leads<input id="wbr-converted" inputmode="numeric" value="' + esc(field(wbr.convertedLeads)) + '"' + dis + '></label></div><p class="scoreline" id="wbr-rate">' + esc(rate == null ? 'Conversion N/A' : 'Conversion ' + pct(rate)) + '</p><div class="actions">' + save + remove + '</div></form>';
+  function wbrDetail(va, span) {
+    var byDate = {};
+    (va.wbrDays || []).forEach(function (row) { byDate[row.workDate] = row; });
+    var editable = can('wbr');
+    var days = weekDates(span.weekStart).map(function (date) {
+      var row = byDate[date] || null;
+      var locked = dayLocked(va, date) || !editable;
+      var dis = locked ? ' disabled' : '';
+      var total = row ? field(row.totalLeads) : '';
+      var converted = row ? field(row.convertedLeads) : '';
+      var rate = row ? CNRScore.conversionRate(row.totalLeads, row.convertedLeads) : null;
+      var save = locked ? '' : '<button type="submit" class="s">Save</button>';
+      var remove = row && !locked ? '<button type="button" class="g s" data-action="delete-wbr" data-id="' + esc(row.id) + '">Remove</button>' : '';
+      return '<form class="day wbr" data-form="wbr" data-date="' + esc(date) + '" data-locked="' + (locked ? '1' : '0') + '"><div><b>' + esc(CNRDates.formatWeekday(date)) + '</b><small>' + esc(CNRDates.formatLong(date)) + '</small></div><label class="field">Total leads<input name="total" inputmode="decimal" value="' + esc(total) + '"' + dis + '></label><label class="field">Converted<input name="converted" inputmode="decimal" value="' + esc(converted) + '"' + dis + '></label><b data-rate>' + esc(rate == null ? '—' : pct(rate)) + '</b><div class="actions">' + save + remove + '</div></form>';
+    }).join('');
+    return '<div class="card"><h2>WBR</h2><p class="mu">Each day stores total leads and converted leads. The rate is converted ÷ total, capped at 100. A blank or zero total is left out. The card shows the week rate.</p></div><div class="days">' + days + '</div>';
   }
 
-  function compTab(va, ev) {
+  function compDetail(va, ev, focus) {
+    if (!ev) return needWeek();
     var comp = ev.competencies || {};
+    var selected = COMP_BY_FOCUS[focus];
     var locked = ev.status === 'closed' || !can('competencies');
     var dis = locked ? ' disabled' : '';
     var fields = COMPS.map(function (item) {
+      if (item[0] !== selected[0]) {
+        return '<input type="hidden" id="' + item[0] + '" value="' + esc(field(comp[item[0]])) + '"><input type="hidden" id="' + item[1] + '" value="' + esc(comp[item[1]] || '') + '">';
+      }
       return '<label class="field">' + esc(item[2]) + '<input id="' + item[0] + '" inputmode="decimal" value="' + esc(field(comp[item[0]])) + '"' + dis + '></label><label class="field">Comment<textarea id="' + item[1] + '"' + dis + '>' + esc(comp[item[1]] || '') + '</textarea></label>';
     }).join('');
-    var save = locked ? '' : '<div class="actions"><button type="submit">Save competencies</button></div>';
-    var note = can('competencies') ? 'Each grade is 0–100 and has its own comment. Leave a grade blank to keep it out of the score. Zero stays in.' : 'Onboarders enter these grades.';
-    if (ev.status === 'closed') note = 'This week is closed.';
-    return '<form id="comp-form" class="stack"><div class="card"><h2>Competencies</h2><p class="mu">' + esc(note) + '</p>' + fields + save + '</div></form>';
+    var save = locked ? '' : '<div class="actions"><button type="submit">Save grade</button></div>';
+    var note = ev.status === 'closed' ? 'This week is closed.' : 'Enter the grade for this week, from 0 to 100, and a comment. Leave the grade blank to keep it out of the score.';
+    return '<form id="comp-form" class="card"><h2>' + esc(selected[2]) + '</h2><p class="mu">' + esc(note) + '</p>' + fields + save + '</form>';
   }
 
   function coachTab(va) {
     var form = '';
     if (can('coaching')) {
-      form = '<form id="coach-form" class="card"><h2>New feedback session</h2><p class="mu">Coaching is history only. It is not part of the weekly score, and a closed week does not freeze it.</p><div class="fields"><label>Date<input id="coach-date" type="date" required value="' + esc(CNRDates.todayISO()) + '"></label><label>Topic<input id="coach-topic" required></label></div><label class="field">Discussion<textarea id="coach-discussion" required></textarea></label><label class="field">Action<textarea id="coach-action" required></textarea></label><div class="actions"><button type="submit">Save session</button></div></form>';
+      form = '<form id="coach-form" class="card"><h2>New feedback session</h2><p class="mu">Add a session any day. It is not part of the weekly score, and a closed week does not freeze it.</p><div class="fields"><label>Date<input id="coach-date" type="date" required value="' + esc(CNRDates.todayISO()) + '"></label><label>Topic<input id="coach-topic" required></label></div><label class="field">What was discussed<textarea id="coach-discussion" required></textarea></label><label class="field">Action<textarea id="coach-action" required></textarea></label><div class="actions"><button type="submit">Save session</button></div></form>';
     }
     var rows = (va.coaching || []).map(function (item) {
       var remove = can('coaching') ? '<button type="button" class="g s" data-action="delete-coaching" data-id="' + esc(item.id) + '">Remove</button>' : '';
@@ -712,7 +770,8 @@
     return '<div class="scorewrap"><table><thead><tr><th>Section</th><th>Score</th><th>Weight</th><th>Eff. %</th><th>Pts</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
-  async function kpiTab(va, ev) {
+  async function kpiSection(va, ev) {
+    if (!ev) return '<div id="kpi-section">' + startForm(CNRDates.mondayOf(va.onboardingStart) || CNRDates.mondayOf(CNRDates.todayISO())) + '</div>';
     var score = ev.score && ev.score.breakdown ? ev.score : CNRScore.scoreEvaluation(await blankScore());
     var line = score.overall == null ? 'No score yet' : points(score.overall);
     var verdict = score.passed == null ? '' : (score.passed ? '<span class="b ok">Meets the pass mark</span>' : '<span class="b bad">Below the pass mark</span>');
@@ -731,11 +790,12 @@
     var latest = va.evaluations[va.evaluations.length - 1];
     var next = latest && latest.status === 'closed' && can('evaluations') ? '<button type="button" data-action="next-week">Next weekly evaluation</button>' : '';
     var endorse = '';
-    if (va.status === 'Ready for endorsement' && can('endorse')) endorse = '<button type="button" data-action="endorse">Endorse</button>';
+    if (va.status === 'Ready for endorsement' && can('endorse')) endorse = '<button type="button" id="endorse" data-action="endorse">Endorse</button>';
     else if (va.status === 'Ready for endorsement') endorse = '<p class="mu">An admin endorses this VA.</p>';
-    else if (va.status === 'Endorsed') endorse = '<p>Endorsed' + (va.endorsedByName ? ' by ' + esc(va.endorsedByName) : '') + '.</p>';
+    else if (va.status === 'Endorsed') endorse = '<p>Endorsed' + (va.endorsedByName ? ' by ' + esc(va.endorsedByName) : '') + (va.endorsedAt ? ' on ' + esc(String(va.endorsedAt).slice(0, 10)) : '') + '.</p>';
+    else endorse = '<p class="mu">Endorse appears after a passing week is closed.</p>';
     var note = score.rescaled ? '<p class="note">Blank sections were left out and the remaining weights were scaled to 100%.</p>' : '';
-    return '<div class="split"><section class="card" id="kpi-card"><h2>Weekly KPI</h2>' + formulaHtml(score) + '<p class="scoreline" id="overall">' + esc(line) + ' ' + verdict + '</p>' + note + scoreTable(score) + '<p class="mu sm">The saved score is computed again when the week closes.</p></section><div><div class="card"><h2>Endorsement</h2>' + (endorse || '<p class="mu">Endorse appears here after a passing week is closed and the status is Ready for endorsement.</p>') + '<div class="actions">' + next + '</div></div>' + close + '</div></div>';
+    return '<div id="kpi-section" class="split"><section class="card" id="kpi-card"><h2>Weekly KPI</h2>' + formulaHtml(score) + '<p class="scoreline" id="overall">' + esc(line) + ' ' + verdict + '</p>' + note + scoreTable(score) + '</section><div><div class="card"><h2>Endorse</h2>' + endorse + '<div class="actions">' + next + '</div></div>' + close + '</div></div>';
   }
 
   async function blankScore() {
@@ -748,7 +808,7 @@
     var rows = va.history.map(function (item) {
       return '<tr><td>' + esc(String(item.changedAt || '').replace('T', ' ').slice(0, 16)) + '</td><td>' + esc(item.previousStatus || '—') + '</td><td>' + badge(item.newStatus) + '</td><td>' + esc(item.note || '') + '</td><td>' + esc(item.changedByName || '') + '</td></tr>';
     }).join('');
-    return '<div class="card tw"><table><thead><tr><th>When</th><th>From</th><th>To</th><th>Note</th><th>By</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    return '<div class="card tw"><h2>Movement history</h2><table><thead><tr><th>When</th><th>From</th><th>To</th><th>Note</th><th>By</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
   async function viewAttendance() {
@@ -756,16 +816,16 @@
     if (!rows.length) return '<h1>Performance Log</h1><p class="lead">Daily attendance for every VA.</p><div class="card"><p class="mu">No attendance yet.</p></div>';
     var body = rows.map(function (row) {
       var day = CNRScore.dailyAttendancePercent(row);
-      return '<tr class="cl" data-href="#/vas/' + encodeURIComponent(row.vaId) + '?tab=attendance"><td>' + esc(CNRDates.formatLong(row.workDate)) + '</td><td>' + esc(row.vaName) + '</td><td>' + (row.absent ? 'Yes' : 'No') + '</td><td>' + esc(row.lateMinutes) + '</td><td>' + esc(row.downtimeMinutes) + '</td><td>' + esc(pct(day)) + '</td></tr>';
+      return '<tr class="cl" data-href="' + profileHash(row.vaId, 'attendance', '') + '"><td>' + esc(CNRDates.formatLong(row.workDate)) + '</td><td>' + esc(row.vaName) + '</td><td>' + (row.absent ? 'Yes' : 'No') + '</td><td>' + esc(row.lateMinutes) + '</td><td>' + esc(row.downtimeMinutes) + '</td><td>' + esc(row.remarks || '—') + '</td><td>' + esc(pct(day)) + '</td></tr>';
     }).join('');
-    return '<h1>Performance Log</h1><p class="lead">One record per VA per work day. Eight hours is 100%.</p><div class="card tw"><table><thead><tr><th>Date</th><th>VA</th><th>Absent</th><th>Late min</th><th>Downtime</th><th>Daily %</th></tr></thead><tbody>' + body + '</tbody></table></div>';
+    return '<h1>Performance Log</h1><p class="lead">One record per VA per work day. Eight hours is 100%.</p><div class="card tw"><table><thead><tr><th>Date</th><th>VA</th><th>Absent</th><th>Late min</th><th>Downtime</th><th>Remarks</th><th>Daily %</th></tr></thead><tbody>' + body + '</tbody></table></div>';
   }
 
   async function viewCoaching() {
     var rows = await CNRStore.listCoaching();
     if (!rows.length) return '<h1>Feedback Sessions</h1><p class="lead">Coaching history across the roster. Sessions are not part of the KPI.</p><div class="card"><p class="mu">No feedback sessions yet.</p></div>';
     var body = rows.map(function (row) {
-      return '<tr class="cl" data-href="#/vas/' + encodeURIComponent(row.vaId) + '?tab=coaching"><td>' + esc(CNRDates.formatLong(row.sessionDate)) + '</td><td>' + esc(row.vaName) + '</td><td>' + esc(row.topic) + '</td><td>' + esc(row.discussion) + '</td><td>' + esc(row.action) + '</td></tr>';
+      return '<tr class="cl" data-href="' + profileHash(row.vaId, 'feedback', '') + '"><td>' + esc(CNRDates.formatLong(row.sessionDate)) + '</td><td>' + esc(row.vaName) + '</td><td>' + esc(row.topic) + '</td><td>' + esc(row.discussion) + '</td><td>' + esc(row.action) + '</td></tr>';
     }).join('');
     return '<h1>Feedback Sessions</h1><p class="lead">Date, topic, discussion, and action. A closed week does not freeze these.</p><div class="card tw"><table><thead><tr><th>Date</th><th>VA</th><th>Topic</th><th>Discussion</th><th>Action</th></tr></thead><tbody>' + body + '</tbody></table></div>';
   }
@@ -778,7 +838,7 @@
     var chips = CNRLabels.STATUSES.map(function (status) { return kpi(status, counts[status] || 0); }).join('');
     var closed = evals.filter(function (ev) { return ev.status === 'closed'; });
     var body = closed.length ? closed.map(function (ev) {
-      return '<tr class="cl" data-href="' + profileHash(ev.vaId, 'kpi', ev.weekStart) + '"><td>' + esc(ev.vaName) + '</td><td>' + esc(CNRDates.formatLong(ev.weekStart)) + '</td><td>' + esc(points(ev.overall)) + '</td><td>' + esc(outcomeLabel(ev.outcome)) + '</td></tr>';
+      return '<tr class="cl" data-href="' + profileHash(ev.vaId, '', ev.weekStart) + '"><td>' + esc(ev.vaName) + '</td><td>' + esc(CNRDates.formatLong(ev.weekStart)) + '</td><td>' + esc(points(ev.overall)) + '</td><td>' + esc(outcomeLabel(ev.outcome)) + '</td></tr>';
     }).join('') : '<tr><td colspan="4" class="mu">No closed weeks yet.</td></tr>';
     return '<h1>Reports</h1><div class="kpis">' + chips + '</div><div class="card tw"><h2>Closed weeks</h2><table><thead><tr><th>VA</th><th>Week</th><th>KPI</th><th>Result</th></tr></thead><tbody>' + body + '</tbody></table></div>';
   }
@@ -858,7 +918,10 @@
     }
     var rows = cache.vas.map(function (va) {
       var ev = latest[va.id];
-      return '<tr class="cl" data-href="' + (ev ? profileHash(va.id, 'qa', ev.weekStart) : '#/vas/' + encodeURIComponent(va.id) + '?tab=qa') + '"><td><b>' + esc(va.fullName) + '</b><small>' + esc(va.clientName || '') + '</small></td><td>' + esc(va.batchName || '—') + '</td><td>' + badge(va.status) + '</td><td>' + esc(ev ? CNRDates.formatLong(ev.weekStart) : '—') + '</td><td>' + esc(ev && ev.qaScore != null ? points(ev.qaScore) : '—') + '</td><td>' + esc(ev && ev.overall != null ? points(ev.overall) : (ev ? 'In progress' : '—')) + '</td><td>' + esc(ev && ev.status === 'closed' ? outcomeLabel(ev.outcome) : (ev ? 'Open' : '—')) + '</td></tr>';
+      var qaText = ev && ev.qaScore != null ? points(ev.qaScore) : '—';
+      var qaTone = qaClass(ev && ev.qaScore);
+      var qaCell = qaTone ? '<span class="' + (qaTone === 'ok' ? 'qa-pass' : 'qa-fail') + '">' + esc(qaText) + '</span>' : esc(qaText);
+      return '<tr class="cl" data-href="' + profileHash(va.id, 'qa', ev ? ev.weekStart : '') + '"><td><b>' + esc(va.fullName) + '</b><small>' + esc(va.clientName || '') + '</small></td><td>' + esc(va.batchName || '—') + '</td><td>' + badge(va.status) + '</td><td>' + esc(ev ? CNRDates.formatLong(ev.weekStart) : '—') + '</td><td>' + qaCell + '</td><td>' + esc(ev && ev.overall != null ? points(ev.overall) : (ev ? 'In progress' : '—')) + '</td><td>' + esc(ev && ev.status === 'closed' ? outcomeLabel(ev.outcome) : (ev ? 'Open' : '—')) + '</td></tr>';
     }).join('');
     return '<h1>QA Sheet</h1><p class="lead">Every VA is listed. QA scores are entered on the VA profile for the open week.</p><div class="card tw"><table><thead><tr><th>VA</th><th>Batch</th><th>Status</th><th>Week</th><th>QA</th><th>KPI</th><th>Result</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
@@ -920,41 +983,89 @@
     }));
   }
 
+  function refreshLive() {
+    document.querySelectorAll('form.day').forEach(function (form) {
+      if (form.dataset.form === 'attendance') updateDayPercent(form);
+    });
+    var attendance = [];
+    document.querySelectorAll('form[data-form="attendance"]').forEach(function (form) {
+      var absent = !!(form.absent && form.absent.checked);
+      var late = form.late ? form.late.value : '';
+      var down = form.down ? form.down.value : '';
+      var remarks = form.remarks ? form.remarks.value.trim() : '';
+      var saved = form.dataset.saved === '1';
+      if (!(saved || absent || late !== '' || down !== '' || remarks)) return;
+      attendance.push(CNRScore.dailyAttendancePercent({
+        absent: absent,
+        lateMinutes: absent ? 0 : late,
+        downtimeMinutes: absent ? 0 : down
+      }));
+    });
+    var attendanceCard = document.getElementById('card-attendance');
+    if (attendanceCard && document.querySelector('form[data-form="attendance"]')) {
+      attendanceCard.querySelector('b').textContent = pct(CNRScore.weeklyAttendance(attendance));
+    }
+    var total = 0;
+    var converted = 0;
+    var any = false;
+    document.querySelectorAll('form[data-form="wbr"]').forEach(function (form) {
+      var leads = form.total.value;
+      var won = form.converted.value;
+      var rate = CNRScore.conversionRate(leads === '' ? null : Number(leads), won === '' ? null : Number(won));
+      var label = form.querySelector('[data-rate]');
+      if (label) label.textContent = rate == null ? '—' : pct(rate);
+      if (leads !== '' && Number(leads) > 0) {
+        any = true;
+        total += Number(leads);
+        converted += won === '' ? 0 : Number(won);
+      }
+    });
+    var wbrCard = document.getElementById('card-wbr');
+    if (wbrCard && document.querySelector('form[data-form="wbr"]')) {
+      wbrCard.querySelector('b').textContent = any ? pct(CNRScore.conversionRate(total, converted)) : '—';
+    }
+    var qaInput = document.getElementById('qa-score');
+    var qaCard = document.getElementById('card-qa');
+    var flag = document.getElementById('qa-flag');
+    if (qaInput && qaCard) {
+      var raw = qaInput.value.trim();
+      var score = raw === '' ? null : Number(raw);
+      var known = score != null && Number.isFinite(score);
+      var tone = known ? qaClass(score) : '';
+      qaCard.classList.toggle('ok', tone === 'ok');
+      qaCard.classList.toggle('bad', tone === 'bad');
+      qaCard.querySelector('b').textContent = known ? points(score) : '—';
+      if (flag) {
+        flag.className = tone === 'ok' ? 'qa-pass' : tone === 'bad' ? 'qa-fail' : 'mu';
+        flag.textContent = tone === 'ok' ? 'Pass · 80 or above' : tone === 'bad' ? 'Fail · below 80' : '';
+      }
+    }
+    Object.keys(COMP_BY_FOCUS).forEach(function (focus) {
+      var fieldName = COMP_BY_FOCUS[focus][0];
+      var input = document.getElementById(fieldName);
+      var card = document.getElementById('card-' + focus);
+      if (!input || !card || input.type === 'hidden') return;
+      card.querySelector('b').textContent = input.value.trim() === '' ? '—' : points(input.value);
+    });
+  }
+
   function onInput(event) {
-    if (event.target.id === 'va-search') {
-      state.dirQuery = event.target.value;
-      filterRows();
-      return;
-    }
     if (event.target.id && event.target.id.indexOf('weight-') === 0 || event.target.id === 'pass-mark') weightSumText();
-    if (event.target.name === 'late' || event.target.name === 'down') updateDayPercent(event.target.form);
-    if (event.target.id === 'wbr-total' || event.target.id === 'wbr-converted') {
-      var total = document.getElementById('wbr-total').value;
-      var converted = document.getElementById('wbr-converted').value;
-      var rate = CNRScore.conversionRate(total === '' ? null : Number(total), converted === '' ? null : Number(converted));
-      var line = document.getElementById('wbr-rate');
-      if (line) line.textContent = rate == null ? 'Conversion N/A' : 'Conversion ' + pct(rate);
-    }
+    var form = event.target.form;
+    if (form && (form.dataset.form === 'attendance' || form.dataset.form === 'wbr')) refreshLive();
+    if (event.target.id === 'qa-score') refreshLive();
+    if (event.target.id && COMPS.some(function (item) { return item[0] === event.target.id; })) refreshLive();
   }
 
   function onChange(event) {
     if (event.target.id === 'week-select') {
       var route = readRoute();
-      navigate(profileHash(route.vaId, route.tab, event.target.value));
+      navigate(profileHash(route.vaId, route.focus, event.target.value));
     }
-    if (event.target.name === 'absent') updateDayPercent(event.target.form);
+    if (event.target.name === 'absent') refreshLive();
   }
 
   function onClick(event) {
-    var chip = event.target.closest && event.target.closest('[data-status-chip]');
-    if (chip) {
-      event.preventDefault();
-      state.status = chip.dataset.statusChip;
-      var search = document.getElementById('va-search');
-      if (search) state.dirQuery = search.value;
-      render();
-      return;
-    }
     var action = event.target.closest && event.target.closest('[data-action]');
     if (action) {
       event.preventDefault();
@@ -971,7 +1082,33 @@
     var name = action.dataset.action;
     var route = readRoute();
     try {
-      if (name === 'add-va') return openVaModal(null);
+      if (name === 'add-menu') {
+        var pop = document.getElementById('add-pop');
+        if (pop) pop.hidden = !pop.hidden;
+        action.setAttribute('aria-expanded', pop && !pop.hidden ? 'true' : 'false');
+        return;
+      }
+      if (name === 'add-va') {
+        closeFloaters();
+        return openVaModal(null);
+      }
+      if (name === 'import-csv') {
+        closeFloaters();
+        return openImportModal();
+      }
+      if (name === 'csv-template') return downloadTemplate();
+      if (name === 'open-card') {
+        var nextFocus = action.dataset.focus;
+        var current = readRoute();
+        return navigate(profileHash(current.vaId, current.focus === nextFocus ? '' : nextFocus, current.week));
+      }
+      if (name === 'toggle-status') {
+        var panel = document.getElementById('status-panel');
+        if (panel) panel.hidden = !panel.hidden;
+        action.setAttribute('aria-expanded', panel && !panel.hidden ? 'true' : 'false');
+        return;
+      }
+      if (name === 'show-history') return navigate(profileHash(route.vaId, 'history', route.week));
       if (name === 'edit-va') return openVaModal(cache.current);
       if (name === 'rename') {
         state.renaming = action.dataset.id;
@@ -988,20 +1125,20 @@
         return navigate(profileHash(route.vaId, 'qa', route.week), 'QA removed.');
       }
       if (name === 'delete-wbr') {
-        await CNRStore.deleteWbr(action.dataset.id);
+        await CNRStore.deleteWbrDay(action.dataset.id);
         return navigate(profileHash(route.vaId, 'wbr', route.week), 'WBR removed.');
       }
       if (name === 'delete-coaching') {
         await CNRStore.deleteCoaching(action.dataset.id);
-        return navigate(profileHash(route.vaId, 'coaching', ''), 'Session removed.');
+        return navigate(profileHash(route.vaId, 'feedback', ''), 'Session removed.');
       }
       if (name === 'endorse') {
         await CNRStore.endorse(route.vaId);
-        return navigate(profileHash(route.vaId, 'kpi', route.week), 'Endorsed.');
+        return navigate(profileHash(route.vaId, route.focus, route.week), 'Endorsed.');
       }
       if (name === 'next-week') {
         var created = await CNRStore.nextEvaluation(route.vaId);
-        return navigate(profileHash(route.vaId, 'kpi', created.weekStart), 'Next week is open.');
+        return navigate(profileHash(route.vaId, route.focus, created.weekStart), 'Next week is open.');
       }
       if (name === 'clear-mock') {
         if (!window.confirm('Clear the preview data in this browser?')) return;
@@ -1030,7 +1167,7 @@
         var monday = CNRDates.mondayOf(form.querySelector('#week-start').value);
         if (!monday) throw new Error('Enter a week.');
         await CNRStore.startEvaluation(route.vaId, monday);
-        return navigate(profileHash(route.vaId, route.tab === 'overview' ? 'attendance' : route.tab, monday), 'Week started.');
+        return navigate(profileHash(route.vaId, route.focus, monday), 'Week started.');
       }
       if (form.dataset.form === 'attendance') {
         await CNRStore.saveAttendance({
@@ -1038,9 +1175,19 @@
           workDate: form.dataset.date,
           absent: form.absent.checked,
           lateMinutes: form.late.value,
-          downtimeMinutes: form.down.value
+          downtimeMinutes: form.down.value,
+          remarks: form.remarks.value
         });
         return navigate(profileHash(route.vaId, 'attendance', route.week), 'Attendance saved.');
+      }
+      if (form.dataset.form === 'wbr') {
+        await CNRStore.saveWbrDay({
+          vaId: route.vaId,
+          workDate: form.dataset.date,
+          totalLeads: form.total.value,
+          convertedLeads: form.converted.value
+        });
+        return navigate(profileHash(route.vaId, 'wbr', route.week), 'WBR saved.');
       }
       if (form.id === 'qa-form') {
         var ev = pickEval(cache.current, route.week);
@@ -1052,15 +1199,6 @@
         });
         return navigate(profileHash(route.vaId, 'qa', ev.weekStart), 'QA saved.');
       }
-      if (form.id === 'wbr-form') {
-        var week = pickEval(cache.current, route.week);
-        await CNRStore.saveWbr({
-          evaluationId: week.id,
-          totalLeads: document.getElementById('wbr-total').value,
-          convertedLeads: document.getElementById('wbr-converted').value
-        });
-        return navigate(profileHash(route.vaId, 'wbr', week.weekStart), 'WBR saved.');
-      }
       if (form.id === 'comp-form') {
         var current = pickEval(cache.current, route.week);
         var input = { evaluationId: current.id };
@@ -1069,7 +1207,7 @@
           input[item[1]] = document.getElementById(item[1]).value;
         });
         await CNRStore.saveCompetencies(input);
-        return navigate(profileHash(route.vaId, 'competencies', current.weekStart), 'Competencies saved.');
+        return navigate(profileHash(route.vaId, route.focus, current.weekStart), 'Grade saved.');
       }
       if (form.id === 'coach-form') {
         await CNRStore.addCoaching({
@@ -1079,17 +1217,17 @@
           discussion: document.getElementById('coach-discussion').value,
           action: document.getElementById('coach-action').value
         });
-        return navigate(profileHash(route.vaId, 'coaching', ''), 'Session saved.');
+        return navigate(profileHash(route.vaId, 'feedback', ''), 'Session saved.');
       }
       if (form.id === 'close-form') {
         var gaps = document.getElementById('gaps');
         var actions = document.getElementById('actions');
         await CNRStore.closeEvaluation(form.dataset.evaluation, gaps ? gaps.value : '', actions ? actions.value : '');
-        return navigate(profileHash(route.vaId, 'kpi', route.week), 'Week closed.');
+        return navigate(profileHash(route.vaId, route.focus, route.week), 'Week closed.');
       }
       if (form.id === 'status-form') {
         await CNRStore.setManualStatus(route.vaId, document.getElementById('manual-status').value);
-        return navigate(profileHash(route.vaId, 'overview', route.week), 'Status updated.');
+        return navigate(profileHash(route.vaId, route.focus, route.week), 'Status updated.');
       }
       if (form.id === 'batch-form') {
         await CNRStore.createBatch(document.getElementById('batch-name').value);
@@ -1195,10 +1333,154 @@
     mod.innerHTML = '';
   }
 
+  function parseCsv(text) {
+    var rows = [];
+    var row = [];
+    var cell = '';
+    var quote = false;
+    var source = String(text || '').replace(/^\uFEFF/, '');
+    for (var i = 0; i < source.length; i++) {
+      var ch = source.charAt(i);
+      if (quote) {
+        if (ch === '"') {
+          if (source.charAt(i + 1) === '"') { cell += '"'; i++; }
+          else quote = false;
+        } else cell += ch;
+      } else if (ch === '"') quote = true;
+      else if (ch === ',') { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && source.charAt(i + 1) === '\n') i++;
+        row.push(cell);
+        cell = '';
+        if (row.some(function (item) { return String(item).trim() !== ''; })) rows.push(row);
+        row = [];
+      } else cell += ch;
+    }
+    if (cell.length || row.length) {
+      row.push(cell);
+      if (row.some(function (item) { return String(item).trim() !== ''; })) rows.push(row);
+    }
+    return rows;
+  }
+
+  function validateImport(matrix) {
+    if (!matrix.length) return { error: 'The file is empty.', items: [] };
+    var header = matrix[0].map(function (item) { return String(item).trim().toLowerCase(); });
+    var missing = CSV_HEADERS.filter(function (name) { return header.indexOf(name) === -1; });
+    if (missing.length) return { error: 'Missing columns: ' + missing.join(', ') + '.', items: [] };
+    var index = {};
+    CSV_HEADERS.forEach(function (name) { index[name] = header.indexOf(name); });
+    var items = matrix.slice(1).map(function (cols, number) {
+      function get(name) { return String(cols[index[name]] || '').trim(); }
+      var errors = [];
+      var status = get('status') || 'Onboarding';
+      if (!get('full_name')) errors.push('Name is required.');
+      if (!CNRDates.isRealDate(get('onboarding_start'))) errors.push('Start date must be YYYY-MM-DD.');
+      if (CNRLabels.CREATE_STATUSES.indexOf(status) === -1) errors.push('Status is not allowed when adding a VA.');
+      if (!get('batch')) errors.push('Batch is required.');
+      return {
+        line: number + 2,
+        fullName: get('full_name'),
+        onboardingStart: get('onboarding_start'),
+        onboarderName: get('onboarder_name'),
+        clientName: get('client_name'),
+        businessName: get('business_name'),
+        schedule: get('schedule'),
+        status: status,
+        batch: get('batch'),
+        sopOrPortfolio: get('sop_or_portfolio'),
+        errors: errors
+      };
+    });
+    if (!items.length) return { error: 'Add at least one VA under the header row.', items: [] };
+    return { error: '', items: items };
+  }
+
+  function paintImport(parsed) {
+    var host = document.getElementById('csv-preview');
+    var save = document.getElementById('csv-save');
+    if (!host) return;
+    if (parsed.error) {
+      host.innerHTML = '<p class="rename-err">' + esc(parsed.error) + '</p>';
+      if (save) save.disabled = true;
+      state.importItems = [];
+      return;
+    }
+    var blocked = parsed.items.some(function (item) { return item.errors.length; });
+    host.innerHTML = '<table><thead><tr><th>Line</th><th>Name</th><th>Start</th><th>Batch</th><th>Status</th><th>Check</th></tr></thead><tbody>'
+      + parsed.items.map(function (item) {
+        return '<tr' + (item.errors.length ? ' class="badrow"' : '') + '><td>' + item.line + '</td><td>' + esc(item.fullName) + '</td><td>' + esc(item.onboardingStart) + '</td><td>' + esc(item.batch) + '</td><td>' + esc(item.status) + '</td><td>' + esc(item.errors.join(' ') || 'Ready') + '</td></tr>';
+      }).join('') + '</tbody></table>';
+    if (save) save.disabled = blocked;
+    state.importItems = blocked ? [] : parsed.items;
+  }
+
+  function readCsvFile(file) {
+    var reader = new FileReader();
+    reader.onload = function () { paintImport(validateImport(parseCsv(String(reader.result || '')))); };
+    reader.readAsText(file);
+  }
+
+  function downloadTemplate() {
+    var blob = new Blob([CSV_HEADERS.join(',') + '\n'], { type: 'text/csv;charset=utf-8' });
+    var link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'va-import-template.csv';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(link.href); }, 1500);
+  }
+
+  function openImportModal() {
+    state.importItems = [];
+    var mod = document.getElementById('mod');
+    mod.innerHTML = '<form class="box import-box" id="import-form"><h2>Import VAs</h2><p class="mu">The template has a header row and no sample people. Every row is checked before anything is saved.</p><div class="actions"><button type="button" class="g" data-action="csv-template">Download template</button></div><label class="field">CSV file<input id="csv-file" type="file" accept=".csv,text/csv"></label><div id="csv-preview" class="tw"></div><p id="mod-err" class="rename-err"></p><div class="actions"><button type="submit" id="csv-save" disabled>Save import</button><button type="button" class="g" data-action="cancel-modal">Cancel</button></div></form>';
+    mod.style.display = 'flex';
+  }
+
   async function onModalSubmit(event) {
     var form = event.target;
-    if (!form || form.id !== 'va-form') return;
+    if (!form || (form.id !== 'va-form' && form.id !== 'import-form')) return;
     event.preventDefault();
+    if (form.id === 'import-form') {
+      var importErr = document.getElementById('mod-err');
+      importErr.textContent = '';
+      var items = state.importItems || [];
+      if (!items.length) {
+        importErr.textContent = 'Choose a CSV and fix every row before saving.';
+        return;
+      }
+      try {
+        var known = await CNRStore.listBatches();
+        var byName = {};
+        known.forEach(function (batch) { byName[batch.name.toLowerCase()] = batch.id; });
+        for (var i = 0; i < items.length; i++) {
+          var item = items[i];
+          var key = item.batch.toLowerCase();
+          if (!byName[key]) {
+            var batch = await CNRStore.createBatch(item.batch);
+            byName[key] = batch.id;
+          }
+          await CNRStore.createVa({
+            fullName: item.fullName,
+            onboardingStart: item.onboardingStart,
+            onboarderName: item.onboarderName,
+            clientName: item.clientName,
+            businessName: item.businessName,
+            schedule: item.schedule,
+            status: item.status,
+            batchId: byName[key],
+            sopOrPortfolio: item.sopOrPortfolio
+          });
+        }
+        closeModal();
+        navigate('#/board', items.length + (items.length === 1 ? ' VA imported.' : ' VAs imported.'));
+      } catch (ex) {
+        importErr.textContent = ex.message;
+      }
+      return;
+    }
     var err = document.getElementById('mod-err');
     err.textContent = '';
     try {
@@ -1221,7 +1503,7 @@
         input.id = form.dataset.id;
         await CNRStore.updateVa(input);
         closeModal();
-        navigate(profileHash(input.id, 'overview', readRoute().week), 'Profile saved.');
+        navigate(profileHash(input.id, readRoute().focus, readRoute().week), 'Profile saved.');
       } else {
         var status = document.getElementById('va-status');
         input.status = status ? status.value : 'Onboarding';

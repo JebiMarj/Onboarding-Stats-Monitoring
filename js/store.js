@@ -58,6 +58,7 @@
             weights: Object.assign({}, root.CNRScore.DEFAULT_WEIGHTS)
           };
         }
+        if (!Array.isArray(state.wbrDays)) state.wbrDays = [];
         return;
       }
     } catch (err) { /* start fresh */ }
@@ -103,15 +104,28 @@
     };
   }
 
-  function mapWbr(row) {
-    row = one(row);
-    if (!row) return null;
+  function mapWbrDay(row) {
     return {
       id: row.id,
-      evaluationId: row.evaluation_id,
+      vaId: row.va_id,
+      workDate: row.work_date,
       totalLeads: num(row.total_leads),
       convertedLeads: num(row.converted_leads)
     };
+  }
+
+  function aggregateWbr(days, weekStart, weekEnd) {
+    var counted = (days || []).filter(function (row) {
+      return row.workDate >= weekStart && row.workDate <= weekEnd && row.totalLeads != null && Number(row.totalLeads) > 0;
+    });
+    if (!counted.length) return null;
+    var total = 0;
+    var converted = 0;
+    counted.forEach(function (row) {
+      total += Number(row.totalLeads);
+      converted += row.convertedLeads == null ? 0 : Number(row.convertedLeads);
+    });
+    return { totalLeads: total, convertedLeads: converted };
   }
 
   function mapComp(row) {
@@ -141,13 +155,17 @@
 
   function mapVa(row, names) {
     var batch = one(row.batches);
+    var wbrDays = (row.wbr_days || []).map(mapWbrDay).sort(function (a, b) {
+      return a.workDate < b.workDate ? -1 : 1;
+    });
     var evaluations = (row.weekly_evaluations || []).map(function (ev) {
       var recorded = ev.score_snapshot || null;
+      var weekEnd = root.CNRDates.addDays(ev.week_start, 6);
       return {
         id: ev.id,
         vaId: ev.va_id,
         weekStart: ev.week_start,
-        weekEnd: root.CNRDates.addDays(ev.week_start, 6),
+        weekEnd: weekEnd,
         status: ev.status,
         outcome: ev.outcome || '',
         gaps: ev.gaps || '',
@@ -156,7 +174,7 @@
         closedAt: ev.closed_at || '',
         closedByName: names[ev.closed_by] || '',
         qa: mapQa(ev.weekly_qa),
-        wbr: mapWbr(ev.weekly_wbr),
+        wbr: aggregateWbr(wbrDays, ev.week_start, weekEnd),
         competencies: mapComp(ev.weekly_competencies),
         preview: recorded,
         score: recorded
@@ -184,9 +202,11 @@
           workDate: day.work_date,
           absent: !!day.absent,
           lateMinutes: day.late_minutes,
-          downtimeMinutes: day.downtime_minutes
+          downtimeMinutes: day.downtime_minutes,
+          remarks: day.remarks || ''
         };
       }).sort(function (a, b) { return a.workDate < b.workDate ? -1 : 1; }),
+      wbrDays: wbrDays,
       evaluations: evaluations,
       coaching: (row.coaching_sessions || []).map(function (item) {
         return {
@@ -302,7 +322,7 @@
         if (!va) throw new Error('VA not found.');
         return va;
       }
-      var res = await sb().from('va_profiles').select('*, batches(id, name), attendance_days(*), weekly_evaluations(*, weekly_qa(*), weekly_wbr(*), weekly_competencies(*)), coaching_sessions(*), status_history(*)').eq('id', id).maybeSingle();
+      var res = await sb().from('va_profiles').select('*, batches(id, name), attendance_days(*), wbr_days(*), weekly_evaluations(*, weekly_qa(*), weekly_competencies(*)), coaching_sessions(*), status_history(*)').eq('id', id).maybeSingle();
       if (res.error) raise(res.error);
       if (!res.data) throw new Error('VA not found.');
       var people = await sb().from('profiles').select('id, full_name, email');
@@ -374,7 +394,8 @@
         work_date: input.workDate,
         absent: !!input.absent,
         late_minutes: input.absent ? 0 : Number(input.lateMinutes || 0),
-        downtime_minutes: input.absent ? 0 : Number(input.downtimeMinutes || 0)
+        downtime_minutes: input.absent ? 0 : Number(input.downtimeMinutes || 0),
+        remarks: input.remarks ? String(input.remarks).trim() : null
       }, { onConflict: 'va_id,work_date' });
       if (res.error) raise(res.error);
     },
@@ -412,18 +433,26 @@
       var res = await sb().from('weekly_qa').delete().eq('evaluation_id', evaluationId);
       if (res.error) raise(res.error);
     },
-    async saveWbr(input) {
-      if (mock) return apply(function (current, actor) { return root.CNRModel.saveWbr(current, actor, input); });
-      var res = await sb().from('weekly_wbr').upsert({
-        evaluation_id: input.evaluationId,
-        total_leads: input.totalLeads === '' || input.totalLeads == null ? null : input.totalLeads,
-        converted_leads: input.convertedLeads === '' || input.convertedLeads == null ? null : input.convertedLeads
-      }, { onConflict: 'evaluation_id' });
+    async saveWbrDay(input) {
+      if (mock) return apply(function (current, actor) { return root.CNRModel.saveWbrDay(current, actor, input); });
+      var totalBlank = input.totalLeads == null || input.totalLeads === '';
+      var convertedBlank = input.convertedLeads == null || input.convertedLeads === '';
+      if (totalBlank && convertedBlank) {
+        var cleared = await sb().from('wbr_days').delete().eq('va_id', input.vaId).eq('work_date', input.workDate);
+        if (cleared.error) raise(cleared.error);
+        return;
+      }
+      var res = await sb().from('wbr_days').upsert({
+        va_id: input.vaId,
+        work_date: input.workDate,
+        total_leads: totalBlank ? null : input.totalLeads,
+        converted_leads: convertedBlank ? null : input.convertedLeads
+      }, { onConflict: 'va_id,work_date' });
       if (res.error) raise(res.error);
     },
-    async deleteWbr(evaluationId) {
-      if (mock) return apply(function (current, actor) { return root.CNRModel.deleteWbr(current, actor, { evaluationId: evaluationId }); });
-      var res = await sb().from('weekly_wbr').delete().eq('evaluation_id', evaluationId);
+    async deleteWbrDay(id) {
+      if (mock) return apply(function (current, actor) { return root.CNRModel.deleteWbrDay(current, actor, { id: id }); });
+      var res = await sb().from('wbr_days').delete().eq('id', id);
       if (res.error) raise(res.error);
     },
     async saveCompetencies(input) {
@@ -555,11 +584,12 @@
           workDate: row.workDate,
           absent: !!row.absent,
           lateMinutes: row.lateMinutes,
-          downtimeMinutes: row.downtimeMinutes
+          downtimeMinutes: row.downtimeMinutes,
+          remarks: row.remarks || ''
         };
       }).sort(function (a, b) { return a.workDate < b.workDate ? 1 : a.workDate > b.workDate ? -1 : 0; });
     }
-    var res = await sb().from('attendance_days').select('id, va_id, work_date, absent, late_minutes, downtime_minutes, va_profiles(full_name)').order('work_date', { ascending: false });
+    var res = await sb().from('attendance_days').select('id, va_id, work_date, absent, late_minutes, downtime_minutes, remarks, va_profiles(full_name)').order('work_date', { ascending: false });
     if (res.error) raise(res.error);
     return (res.data || []).map(function (row) {
       var va = one(row.va_profiles);
@@ -570,7 +600,8 @@
         workDate: row.work_date,
         absent: !!row.absent,
         lateMinutes: row.late_minutes,
-        downtimeMinutes: row.downtime_minutes
+        downtimeMinutes: row.downtime_minutes,
+        remarks: row.remarks || ''
       };
     });
   };

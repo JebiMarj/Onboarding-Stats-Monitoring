@@ -27,6 +27,7 @@ function scores(overrides) {
 
 test('a full day with no lost minutes is 100%', () => {
   assert.equal(Score.dailyAttendancePercent({ absent: false, lateMinutes: 0, downtimeMinutes: 0 }), 100);
+  assert.equal(Score.dailyAttendancePercent({ lateMinutes: 60, downtimeMinutes: 0 }), 87.5);
 });
 
 test('lost minutes reduce the day from 480', () => {
@@ -156,7 +157,7 @@ test('the formula text names weights, the pass mark, and rescaling', () => {
   });
   const text = Score.describeScore(full);
   assert.match(text, /Attendance × 10%/);
-  assert.match(text, /Sales conversion × 30%/);
+  assert.match(text, /WBR × 30%/);
   assert.match(text, /Pass mark: 80/);
   const partial = Score.describeScore(Score.scoreEvaluation({
     scores: scores({ attendance: 90 }),

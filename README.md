@@ -69,11 +69,11 @@ Training completed → Add VA (name, onboarding start, onboarder, client, busine
 
 Start a weekly evaluation on a Monday. The next week is created with Next weekly evaluation after the current week is closed. One week per VA can be open.
 
-Each work day has one attendance row. Eight hours is 480 minutes and scores 100%. A full-day absence is 0%. Otherwise the day is `(480 − late minutes − downtime minutes) / 480 × 100`, and it cannot go below 0. Weekly attendance is the average of the days that were saved. A day with no row is left out of the average.
+Each work day has one attendance row: absent or not, late minutes, downtime minutes, and a remark for the reason. Eight hours is 480 minutes and scores 100%. A full-day absence is 0%. Otherwise the day is `(480 − late minutes − downtime minutes) / 480 × 100`, and it cannot go below 0. Weekly attendance is the average of the days that were saved. A day with no row is left out of the average.
 
-Weekly QA is a score from 0 to 100 plus an evaluation-form link. The call-recording link is optional. Links must be `http` or `https`.
+Weekly QA is a score from 0 to 100, an evaluation-form link, and a call-recording link. Links must be `http` or `https`, or blank. 80 or above is a pass and shows green. Below 80 is a fail and shows red.
 
-Weekly WBR stores total leads and converted leads. The conversion rate is `converted / total × 100`, capped at 100. If total leads is blank or 0, the rate is N/A and that section drops out of the score.
+WBR is one row per work day: total leads and converted leads. A day's rate is `converted / total × 100`, capped at 100. The week rate, which is the KPI section, is the sum of converted leads divided by the sum of total leads for days whose total is greater than zero. A blank or zero total is left out. If no day counts, that section drops out of the score.
 
 Competencies are tool navigation, communication, critical thinking, and core values. Each is 0–100 and has its own comment. An onboarder enters them.
 
@@ -86,7 +86,7 @@ Default weights, editable in Settings, must sum to 100:
 | Section | Weight |
 | --- | --- |
 | Attendance | 10% |
-| Sales conversion | 30% (the score is the conversion rate itself) |
+| WBR | 30% (the score is the week's conversion rate) |
 | QA score | 20% |
 | Tool navigation | 10% |
 | Communication | 10% |
@@ -138,8 +138,12 @@ The page follows the system light or dark setting. Dark mode / Light mode saves 
 
 ## Screens
 
-The top bar holds Onboarding (Board, VA Directory, Batches), Performance (Performance log, Feedback sessions, QA sheet), Training (Results, Reports), and Reports. Search, the theme control, and the account menu sit on the right. Settings and sign out are in the account menu. A narrow window folds the menus into one menu button.
+The top bar holds Onboarding (Board, Batches), Performance (Performance log, Feedback sessions, QA sheet), Training (Results, Reports), and Reports. Search, the theme control, and the account menu sit on the right. Settings and sign out are in the account menu. A narrow window folds the menus into one menu button.
 
-The profile steps are overview, daily attendance, QA, WBR, competencies, feedback sessions, weekly KPI, and movement history.
+The board has a + button for adding one VA or importing a CSV. The template is a header row only. The import shows a preview and does not save until every row is valid. A board card opens the profile. Search, on the right of the bar and on the `/` key, finds VAs from the board.
 
-The board columns are Onboarding, Continue onboarding, Ready for endorsement, and Endorsed. Resigned and EOC sit under the board. A card opens the profile. Status changes that the database reserves — closing a week, and Endorse — stay on those actions. The directory starts empty. Search is the control on the right of the bar, and the `/` key.
+The profile is a header plus eight cards: Attendance, QA score, WBR, Tool navigation, Critical thinking, Communication, Core values, and Feedback sessions. A card opens its inputs underneath. Weekly KPI, Close week, and Endorse stay below the cards. Status and movement history sit in the Status menu.
+
+## Schema change waiting for approval
+
+`supabase/migrations/20261022_daily_wbr_and_remarks.sql` adds `attendance_days.remarks` and a daily `wbr_days` table, then replaces `compute_kpi_snapshot`. It does not drop `weekly_wbr`. Do not apply it until it is approved. `supabase/schema.sql` matches a fresh install and is not a migration for the database that is already live.
