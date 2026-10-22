@@ -116,6 +116,18 @@ test('Postgres formula matches the JavaScript formula and RLS enforces roles', {
   assert.equal(history.rows[0].new_status, 'Onboarding');
   assert.match(history.rows[0].note, /Added to the monitoring sheet/);
 
+  await expectThrow(
+    asUser(db, admin, () => db.query(`update public.va_profiles set status = 'Endorsed' where id = $1`, [va.id])),
+    /Only a VA who is ready for endorsement can be endorsed/
+  );
+  await expectThrow(
+    asUser(db, onboarder, () => db.query(`update public.va_profiles set status = 'Endorsed' where id = $1`, [va.id])),
+    /Your role cannot do that/
+  );
+  await asUser(db, onboarder, () => db.query(`update public.va_profiles set status = 'Resigned' where id = $1`, [va.id]));
+  await asUser(db, admin, () => db.query(`update public.va_profiles set status = 'EOC' where id = $1`, [va.id]));
+  await asUser(db, onboarder, () => db.query(`update public.va_profiles set status = 'Onboarding' where id = $1`, [va.id]));
+
   async function openWeek(week) {
     const row = await asUser(db, onboarder, () => db.query(
       `insert into public.weekly_evaluations (va_id, week_start) values ($1, $2) returning id`,
@@ -432,12 +444,14 @@ test('Postgres formula matches the JavaScript formula and RLS enforces roles', {
     `insert into public.weekly_qa (evaluation_id, score) values ($1, 80)`,
     [extraB.rows[0].id]
   ));
-  const qaWeek = await asUser(db, qa, () => db.query(
-    `insert into public.weekly_evaluations (va_id, week_start, status)
-     values ($1, '2026-11-16', 'open') returning id`,
-    [va.id]
-  ));
-  assert.ok(qaWeek.rows[0].id);
+  await expectThrow(
+    asUser(db, qa, () => db.query(
+      `insert into public.weekly_evaluations (va_id, week_start, status)
+       values ($1, '2026-11-16', 'open')`,
+      [va.id]
+    )),
+    /row-level security|permission denied/i
+  );
 
   await expectThrow(
     db.exec(fs.readFileSync(path.join(root, 'supabase/reset_old_schema.sql'), 'utf8')),

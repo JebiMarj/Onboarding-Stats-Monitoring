@@ -458,12 +458,14 @@
       var evaluationId = found.data && found.data.id;
       if (found.data && found.data.status === 'closed') throw new Error('This week is closed and its scores cannot be changed.');
       if (!evaluationId) {
+        if (session.role === 'qa') throw new Error('An onboarder needs to start this week before a QA score can be saved.');
         var created = await sb().from('weekly_evaluations').insert({
           va_id: input.vaId,
           week_start: week,
           status: 'open'
         }).select('id').single();
         if (created.error) {
+          if (session.role === 'qa') throw new Error('An onboarder needs to start this week before a QA score can be saved.');
           if (/duplicate|unique/i.test(created.error.message || '')) throw new Error('That week cannot be added while another week is open.');
           raise(created.error);
         }

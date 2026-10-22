@@ -280,6 +280,28 @@ test('the last admin cannot be demoted and a closed week is frozen', () => {
   assert.equal(Model.endorse(state, admin, { vaId: vaId }).error, 'Only a VA who is ready for endorsement can be endorsed.');
 });
 
+test('the status menu can set Endorsed only from Ready for endorsement', () => {
+  let state = fresh();
+  state = must(Model.createBatch(state, admin, { name: 'Batch E' })).state;
+  state = must(Model.createVa(state, admin, {
+    fullName: 'Faye Gomez',
+    onboardingStart: '2026-10-12',
+    batchId: state.batches[0].id
+  })).state;
+  const vaId = state.vas[0].id;
+  assert.equal(Model.setManualStatus(state, onboarder, { id: vaId, status: 'Endorsed' }).error, 'Your role cannot do that.');
+  assert.equal(Model.setManualStatus(state, admin, { id: vaId, status: 'Endorsed' }).error, 'Only a VA who is ready for endorsement can be endorsed.');
+  state = must(Model.setManualStatus(state, onboarder, { id: vaId, status: 'Resigned' })).state;
+  assert.equal(state.vas[0].status, 'Resigned');
+  state = must(Model.setManualStatus(state, onboarder, { id: vaId, status: 'EOC' })).state;
+  assert.equal(state.vas[0].status, 'EOC');
+  state = must(Model.setManualStatus(state, admin, { id: vaId, status: 'Ready for endorsement' })).state;
+  state = must(Model.setManualStatus(state, admin, { id: vaId, status: 'Endorsed' })).state;
+  assert.equal(state.vas[0].status, 'Endorsed');
+  assert.equal(state.vas[0].endorsedBy, admin.id);
+  assert.ok(state.vas[0].endorsedAt);
+});
+
 test('QA can be saved on a second open week and a new WBR date cannot repeat', () => {
   let state = fresh();
   state = must(Model.createBatch(state, admin, { name: 'Batch D' })).state;
@@ -290,7 +312,14 @@ test('QA can be saved on a second open week and a new WBR date cannot repeat', (
   })).state;
   const vaId = state.vas[0].id;
   state = must(Model.startEvaluation(state, admin, { vaId: vaId, weekStart: '2026-01-05' })).state;
-  state = must(Model.saveQaForWeek(state, qa, {
+  assert.equal(Model.saveQaForWeek(state, qa, {
+    vaId: vaId,
+    weekStart: '2026-01-12',
+    score: 79,
+    formUrl: 'https://example.com/form',
+    recordingUrl: 'https://example.com/call'
+  }).error, 'An onboarder needs to start this week before a QA score can be saved.');
+  state = must(Model.saveQaForWeek(state, admin, {
     vaId: vaId,
     weekStart: '2026-01-12',
     score: 79,
