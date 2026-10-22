@@ -362,6 +362,20 @@ test('Postgres formula matches the JavaScript formula and RLS enforces roles', {
     )),
     /Attendance is finalized/
   );
+  await asUser(db, onboarder, () => db.query(
+    `insert into public.wbr_days (va_id, work_date, total_leads, converted_leads)
+     values ($1, '2026-11-02', 8, 3)`,
+    [va.id]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `update public.wbr_days set converted_leads = 4 where va_id = $1 and work_date = '2026-11-02'`,
+    [va.id]
+  ));
+  const wbrWhileFinalized = await db.query(
+    `select converted_leads from public.wbr_days where va_id = $1 and work_date = '2026-11-02'`,
+    [va.id]
+  );
+  assert.equal(Number(wbrWhileFinalized.rows[0].converted_leads), 4);
   await expectThrow(
     asUser(db, onboarder, () => db.query(
       `update public.va_profiles set attendance_finalized_at = null where id = $1`,

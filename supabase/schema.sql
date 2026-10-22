@@ -459,7 +459,7 @@ begin
     target_va := new.va_id;
     target_day := new.work_date;
   end if;
-  if exists (
+  if TG_TABLE_NAME = 'attendance_days' and exists (
     select 1 from public.va_profiles v
     where v.id = target_va
       and v.attendance_finalized_at is not null

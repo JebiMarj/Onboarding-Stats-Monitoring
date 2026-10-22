@@ -2,6 +2,8 @@
 -- John applies this after review. Do not run it against the hosted project from the app.
 -- While attendance_finalized_at is set, that VA's attendance rows cannot be added, edited, or deleted.
 -- An admin or onboarder can set the lock. Only an admin can clear it.
+-- freeze_closed_attendance() also runs for wbr_days. The finalized check applies only when
+-- TG_TABLE_NAME = 'attendance_days'. Closed-week checks still apply to both tables.
 -- A closed week still blocks its own days after the lock is cleared.
 
 alter table public.va_profiles
@@ -77,7 +79,7 @@ begin
     target_va := new.va_id;
     target_day := new.work_date;
   end if;
-  if exists (
+  if TG_TABLE_NAME = 'attendance_days' and exists (
     select 1 from public.va_profiles v
     where v.id = target_va
       and v.attendance_finalized_at is not null
