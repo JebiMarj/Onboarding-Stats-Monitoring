@@ -60,6 +60,8 @@ body {
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 #app { display: flex; min-height: 100%; }
+#app[hidden],
+#login[hidden] { display: none !important; }
 #side {
   width: 232px;
   background: var(--side);
@@ -386,6 +388,8 @@ a.btn {
 }
 a.btn:hover { background: var(--hv); }
 .sheethead { margin-bottom: 4px; }
+.back { margin: 0; }
+.sheethead h1 .g { margin-left: auto; }
 .sheetnav {
   display: flex;
   align-items: flex-end;

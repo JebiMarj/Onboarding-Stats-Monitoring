@@ -417,8 +417,8 @@
       var on = tab[0] === route.tab ? ' class="on"' : '';
       return '<a href="' + profileHash(va.id, tab[0], ev ? ev.weekStart : '') + '"' + on + '>' + esc(tab[1]) + '</a>';
     }).join('');
-    var edit = can('manage_va') ? '<button type="button" class="g" data-action="edit-va">Edit</button>' : '';
-    return '<p><a href="#/vas">← VA Directory</a></p><div class="sheethead"><h1><span class="av">' + esc(initials(va.fullName)) + '</span>' + esc(va.fullName) + ' ' + badge(va.status) + '</h1><p class="lead">' + esc([va.clientName, va.businessName, va.batchName].filter(Boolean).join(' · ') || 'No client yet') + '</p></div><div class="sheetnav"><nav class="tabs">' + tabs + '</nav>' + weekPicker(va, ev) + edit + '</div>';
+    var edit = can('manage_va') ? '<button type="button" class="g s" data-action="edit-va">Edit</button>' : '';
+    return '<p class="back"><a href="#/vas">← VA Directory</a></p><div class="sheethead"><h1><span class="av">' + esc(initials(va.fullName)) + '</span>' + esc(va.fullName) + ' ' + badge(va.status) + edit + '</h1><p class="lead">' + esc([va.clientName, va.businessName, va.batchName].filter(Boolean).join(' · ') || 'No client yet') + '</p></div><nav class="tabs">' + tabs + '</nav><div class="sheetnav">' + weekPicker(va, ev) + '</div>';
   }
 
   async function viewProfile(route) {
