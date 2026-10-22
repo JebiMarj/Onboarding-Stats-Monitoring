@@ -2,11 +2,13 @@
 
 Static site for weekly onboarding QA. There is no build step. Supabase provides Postgres and email/password sign-in. Row Level Security enforces roles.
 
-Do not deploy this until the SQL below has been run on the Supabase project. The new pages expect the new tables. Old tracker rows are not copied. Back them up first if you still need them.
+The screen is the earlier sidebar app: dark navigation, Onboarding Board, VA Directory, and a profile with the onboarding steps. Weekly attendance by minutes, competency comments, coaching actions, the KPI, and endorsement use that layout. The database underneath is the current schema.
+
+The hosted project already has that schema, with one admin profile and no VA rows. Do not run the reset again, and do not import old VA records. This repository does not add a migration. The SQL steps below are only for a brand-new database.
 
 ## Files
 
-- `index.html`, `app.css`, `favicon.svg` — the page
+- `index.html`, `app.css`, `logo.png`, `favicon.svg` — the page
 - `config.js` — Supabase project URL and anon key
 - `js/` — dates, labels, scoring, permissions, in-memory rules, data access, and the screen
 - `supabase/backup_before_reset.md` — export the current data before anything is dropped
@@ -42,9 +44,9 @@ Opening the site as `/?mock=1` stores a preview in this browser and does not cal
 
 The site is a static site. Publish directory: `.` Build command: empty.
 
-`render.yaml` describes the existing service named `cnr-va-tracker`. If that service is already connected to this repo, do not create a second one. Confirm the publish directory and the empty build command, then deploy only after the SQL in section 1 has been applied. A deploy before that will load pages that cannot find the new tables.
+`render.yaml` describes the existing service named `cnr-va-tracker`. If that service is already connected to this repo, do not create a second one. Confirm the publish directory and the empty build command. The hosted project this repo points at already has the current schema. On a brand-new project, deploy only after the SQL in section 1 has been applied.
 
-Pushing `main` redeploys if auto-deploy is on. Keep this branch undeployed until the database is ready.
+Pushing `main` redeploys if auto-deploy is on.
 
 ## Roles
 
@@ -132,4 +134,10 @@ That covers attendance minute math, a full-day absence, the weekly average, conv
 
 ## Theme
 
-The page follows the system light or dark setting. Dark mode / Light mode saves the choice in this browser under `cnr-theme`.
+The page follows the system light or dark setting. Dark mode / Light mode saves the choice in this browser under `cnr_theme` and `cnr-theme`.
+
+## Screens
+
+Training: Batches, Training Results, Training Reports. VA Performance: Onboarding Board, VA Directory, the profile (overview, daily attendance, QA, WBR, competencies, feedback sessions, weekly KPI, movement history), Performance Log, Feedback Sessions, Reports. QA Monitoring: QA Sheet and Settings.
+
+The board columns are Onboarding, Continue onboarding, Ready for endorsement, and Endorsed. Resigned and EOC sit under the board. A card opens the profile. Status changes that the database reserves — closing a week, and Endorse — stay on those actions. The directory starts empty. Search is the field at the top of the window, and the `/` key.
