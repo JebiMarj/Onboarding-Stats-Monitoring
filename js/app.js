@@ -648,7 +648,11 @@
       else if (key === 'feedback') {
         value = bits.value;
         sub = bits.sub;
-      } else if (COMP_BY_FOCUS[key]) value = points(compValue(ev, COMP_BY_FOCUS[key][0]));
+      } else if (COMP_BY_FOCUS[key]) {
+        var fieldName = COMP_BY_FOCUS[key][0];
+        var latestScore = latestCompetencyScore(va, fieldName);
+        value = points(latestScore != null ? latestScore : compValue(ev, fieldName));
+      }
       return summaryCard(key, item[1], value, sub, tone, false);
     }).join('');
     if (focus) return sectionChrome(va, route) + detailFor(va, ev, span, focus);
@@ -717,40 +721,31 @@
     return lock + '<div class="card att-card" id="attendance-panel" data-week-start="' + esc(span.weekStart) + '" data-week-end="' + esc(span.weekEnd) + '" data-week-pct="' + esc(weekValue) + '"><div class="att-head"><div><h2>Attendance</h2></div>' + add + '</div><div class="att-wrap"><table class="att-table"><thead><tr><th>Date</th><th>Status</th><th>Late (min)</th><th>Downtime (min)</th><th>Daily score</th><th>Reason / notes</th><th>Actions</th></tr></thead><tbody id="att-rows">' + body + '</tbody></table></div></div>';
   }
 
-  function qaAnchor(va) {
-    if (va.onboardingStart) return va.onboardingStart;
-    var starts = (va.evaluations || []).map(function (ev) { return ev.weekStart; }).filter(Boolean).sort();
-    return starts[0] || CNRDates.todayISO();
+  function qaRangeLabel(ev) {
+    var qa = ev.qa || {};
+    if (qa.periodStart) {
+      var from = CNRDates.formatLong(qa.periodStart);
+      if (qa.periodEnd) return from + ' – ' + CNRDates.formatLong(qa.periodEnd);
+      return from;
+    }
+    if (!ev.weekStart) return '—';
+    return CNRDates.formatLong(ev.weekStart) + ' – ' + CNRDates.formatLong(ev.weekEnd);
   }
 
-  function qaWeekChoices(va) {
-    var anchorDate = qaAnchor(va);
-    var anchor = CNRDates.mondayOf(anchorDate) || CNRDates.mondayOf(CNRDates.todayISO());
-    var today = CNRDates.mondayOf(CNRDates.todayISO());
-    var last = anchor;
-    if (today && today > last) last = today;
-    (va.evaluations || []).forEach(function (ev) {
-      if (ev.weekStart && ev.weekStart > last) last = ev.weekStart;
-    });
-    var weeks = [];
-    var seen = {};
-    var cursor = anchor;
-    var guard = 0;
-    while (cursor && cursor <= last && guard < 260) {
-      weeks.push(cursor);
-      seen[cursor] = true;
-      cursor = CNRDates.addDays(cursor, 7);
-      guard++;
-    }
-    (va.evaluations || []).forEach(function (ev) {
-      if (ev.weekStart && !seen[ev.weekStart]) weeks.push(ev.weekStart);
-    });
-    weeks.sort();
-    return {
-      anchor: anchorDate,
-      weeks: weeks,
-      preferred: today && today >= anchor ? today : anchor
-    };
+  function qaSortKey(ev) {
+    return (ev.qa && ev.qa.periodStart) || ev.weekStart || '';
+  }
+
+  function latestCompetencyScore(va, key) {
+    var rows = (va.competencyEntries || []).filter(function (row) { return row.competency === key; });
+    if (!rows.length) return null;
+    return rows[0].score;
+  }
+
+  function rowActions(editAction, editId, deleteAction, deleteId, extra) {
+    var more = extra || '';
+    return '<button type="button" class="att-link" data-action="' + editAction + '" data-id="' + esc(editId) + '"' + more + '>Edit</button>'
+      + '<button type="button" class="att-trash" data-action="' + deleteAction + '" data-id="' + esc(deleteId) + '"' + more + ' aria-label="Delete"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg></button>';
   }
 
   function qaPill(score) {
@@ -765,24 +760,19 @@
   }
 
   function qaDetail(va) {
-    var anchor = qaAnchor(va);
     var rows = (va.evaluations || []).filter(function (ev) { return ev.qa && ev.qa.score != null; }).slice().sort(function (a, b) {
-      return a.weekStart < b.weekStart ? 1 : a.weekStart > b.weekStart ? -1 : 0;
+      var left = qaSortKey(a);
+      var right = qaSortKey(b);
+      return left < right ? 1 : left > right ? -1 : 0;
     });
     var body = rows.map(function (ev) {
       var qa = ev.qa;
       var change = ev.status !== 'closed' && can('qa');
-      var actions = '';
-      if (change) {
-        actions = '<button type="button" class="att-link" data-action="edit-qa" data-week="' + esc(ev.weekStart) + '">Edit</button>'
-          + '<button type="button" class="att-trash" data-action="delete-qa" data-id="' + esc(ev.id) + '" aria-label="Delete"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg></button>';
-      }
-      var number = CNRDates.trainingWeekNumber(anchor, ev.weekStart);
-      var dates = CNRDates.formatMonthDay(ev.weekStart) + ' – ' + CNRDates.formatMonthDay(ev.weekEnd);
-      return '<tr><td>Week ' + esc(number) + '</td><td>' + esc(dates) + '</td><td>' + qaPill(qa.score) + '</td><td>' + qaLink(qa.formUrl) + '</td><td>' + qaLink(qa.recordingUrl) + '</td><td><div class="att-actions">' + actions + '</div></td></tr>';
+      var actions = change ? rowActions('edit-qa', qa.id, 'delete-qa', ev.id) : '';
+      return '<tr><td>' + esc(qaRangeLabel(ev)) + '</td><td>' + qaPill(qa.score) + '</td><td>' + qaLink(qa.formUrl) + '</td><td>' + qaLink(qa.recordingUrl) + '</td><td><div class="att-actions">' + actions + '</div></td></tr>';
     }).join('');
     var add = can('qa') ? '<button type="button" class="att-add" data-action="add-qa">+ Add QA</button>' : '';
-    return '<div class="card att-card" id="qa-panel"><div class="att-head"><div><h2>QA score</h2></div>' + add + '</div><div class="att-wrap"><table class="att-table"><thead><tr><th>Week</th><th>Dates</th><th>Score</th><th>Evaluation form</th><th>Call recording</th><th>Actions</th></tr></thead><tbody>' + body + '</tbody></table></div></div>';
+    return '<div class="card att-card" id="qa-panel"><div class="att-head"><div><h2>QA score</h2></div>' + add + '</div><div class="att-wrap"><table class="att-table"><thead><tr><th>Dates</th><th>Score</th><th>Evaluation form</th><th>Call recording</th><th>Actions</th></tr></thead><tbody>' + body + '</tbody></table></div></div>';
   }
 
   function wbrDetail(va) {
@@ -804,32 +794,29 @@
     return '<div class="card att-card" id="wbr-panel"><div class="att-head"><div><h2>WBR</h2></div>' + add + '</div><div class="att-wrap"><table class="att-table"><thead><tr><th>Date</th><th>Total leads</th><th>Converted leads</th><th>Conversion rate</th><th>Actions</th></tr></thead><tbody>' + body + '</tbody></table></div></div>';
   }
 
-  function compDetail(va, ev, focus, span) {
-    var comp = (ev && ev.competencies) || {};
+  function compDetail(va, ev, focus) {
     var selected = COMP_BY_FOCUS[focus];
-    var locked = (ev && ev.status === 'closed') || !can('competencies');
-    var week = (ev && ev.weekStart) || (span && span.weekStart) || '';
-    var dis = locked ? ' disabled' : '';
-    var fields = COMPS.map(function (item) {
-      if (item[0] !== selected[0]) {
-        return '<input type="hidden" id="' + item[0] + '" value="' + esc(field(comp[item[0]])) + '"><input type="hidden" id="' + item[1] + '" value="' + esc(comp[item[1]] || '') + '">';
-      }
-      return '<label class="field">' + esc(item[2]) + '<input id="' + item[0] + '" inputmode="decimal" value="' + esc(field(comp[item[0]])) + '"' + dis + '></label><label class="field">Comment<textarea id="' + item[1] + '"' + dis + '>' + esc(comp[item[1]] || '') + '</textarea></label>';
+    var key = selected[0];
+    var rows = (va.competencyEntries || []).filter(function (row) { return row.competency === key; });
+    var body = rows.map(function (row) {
+      var change = can('competencies') && !dayLocked(va, row.entryDate);
+      var extra = ' data-focus="' + esc(focus) + '" data-competency="' + esc(key) + '" data-date="' + esc(row.entryDate) + '"';
+      var actions = change ? rowActions('edit-comp', row.id, 'delete-comp', row.id, extra) : '';
+      var comment = row.comment ? esc(row.comment) : '—';
+      return '<tr><td>' + esc(CNRDates.formatLong(row.entryDate)) + '</td><td>' + esc(points(row.score)) + '</td><td>' + comment + '</td><td><div class="att-actions">' + actions + '</div></td></tr>';
     }).join('');
-    var save = locked ? '' : '<div class="actions"><button type="submit">Save</button></div>';
-    return '<form id="comp-form" class="card" data-week="' + esc(week) + '"><h2>' + esc(selected[2]) + '</h2>' + fields + save + '</form>';
+    var add = can('competencies') ? '<button type="button" class="att-add" data-action="add-comp" data-focus="' + esc(focus) + '">+ Add</button>' : '';
+    return '<div class="card att-card" id="comp-panel" data-focus="' + esc(focus) + '"><div class="att-head"><div><h2>' + esc(selected[2]) + '</h2></div>' + add + '</div><div class="att-wrap"><table class="att-table"><thead><tr><th>Date</th><th>Score</th><th>Comment</th><th>Actions</th></tr></thead><tbody>' + body + '</tbody></table></div></div>';
   }
 
   function coachTab(va) {
-    var form = '';
-    if (can('coaching')) {
-      form = '<form id="coach-form" class="card"><h2>Feedback sessions</h2><div class="fields"><label>Date<input id="coach-date" type="date" required value="' + esc(CNRDates.todayISO()) + '"></label><label>Topic<input id="coach-topic" required></label></div><label class="field">What was discussed<textarea id="coach-discussion" required></textarea></label><label class="field">Action<textarea id="coach-action" required></textarea></label><div class="actions"><button type="submit">Save</button></div></form>';
-    }
-    var rows = (va.coaching || []).map(function (item) {
-      var remove = can('coaching') ? '<button type="button" class="g s" data-action="delete-coaching" data-id="' + esc(item.id) + '">Remove</button>' : '';
-      return '<article class="card"><div class="bar"><b>' + esc(CNRDates.formatLong(item.sessionDate)) + '</b><span>' + esc(item.topic) + '</span><span class="sp"></span>' + remove + '</div><p>' + esc(item.discussion) + '</p><p><b>Action. </b>' + esc(item.action) + '</p></article>';
+    var rows = va.coaching || [];
+    var body = rows.map(function (item) {
+      var actions = can('coaching') ? rowActions('edit-coaching', item.id, 'delete-coaching', item.id) : '';
+      return '<tr><td>' + esc(CNRDates.formatLong(item.sessionDate)) + '</td><td>' + esc(item.topic) + '</td><td>' + esc(item.discussion) + '</td><td>' + esc(item.action) + '</td><td><div class="att-actions">' + actions + '</div></td></tr>';
     }).join('');
-    return form + rows;
+    var add = can('coaching') ? '<button type="button" class="att-add" data-action="add-coaching">+ Add</button>' : '';
+    return '<div class="card att-card" id="feedback-panel"><div class="att-head"><div><h2>Feedback sessions</h2></div>' + add + '</div><div class="att-wrap"><table class="att-table"><thead><tr><th>Date</th><th>Topic</th><th>What was discussed</th><th>Action</th><th>Actions</th></tr></thead><tbody>' + body + '</tbody></table></div></div>';
   }
 
   function historyTab(va) {
@@ -1098,7 +1085,29 @@
         return navigate(profileHash(route.vaId, 'attendance', route.week), 'Attendance removed.');
       }
       if (name === 'add-qa') return openQaModal(cache.current, '');
-      if (name === 'edit-qa') return openQaModal(cache.current, action.dataset.week);
+      if (name === 'edit-qa') return openQaModal(cache.current, action.dataset.id);
+      if (name === 'add-comp') return openCompModal(cache.current, action.dataset.focus, null);
+      if (name === 'edit-comp') {
+        var compRow = (cache.current.competencyEntries || []).filter(function (row) { return row.id === action.dataset.id; })[0];
+        if (!compRow) return;
+        return openCompModal(cache.current, action.dataset.focus, compRow);
+      }
+      if (name === 'delete-comp') {
+        if (!window.confirm('Delete this competency entry?')) return;
+        await CNRStore.deleteCompetencyEntry({
+          id: action.dataset.id,
+          vaId: route.vaId,
+          competency: action.dataset.competency,
+          entryDate: action.dataset.date
+        });
+        return navigate(profileHash(route.vaId, route.focus, route.week), 'Entry removed.');
+      }
+      if (name === 'add-coaching') return openCoachModal(cache.current, null);
+      if (name === 'edit-coaching') {
+        var coachRow = (cache.current.coaching || []).filter(function (row) { return row.id === action.dataset.id; })[0];
+        if (!coachRow) return;
+        return openCoachModal(cache.current, coachRow);
+      }
       if (name === 'add-wbr') return openWbrModal(cache.current, null);
       if (name === 'edit-wbr') {
         var wbrRow = (cache.current.wbrDays || []).filter(function (row) { return row.id === action.dataset.id; })[0];
@@ -1116,6 +1125,7 @@
         return navigate(profileHash(route.vaId, 'wbr', route.week), 'WBR removed.');
       }
       if (name === 'delete-coaching') {
+        if (!window.confirm('Delete this feedback session?')) return;
         await CNRStore.deleteCoaching(action.dataset.id);
         return navigate(profileHash(route.vaId, 'feedback', ''), 'Session removed.');
       }
@@ -1150,42 +1160,6 @@
           convertedLeads: form.converted.value
         });
         return navigate(profileHash(route.vaId, 'wbr', route.week), 'WBR saved.');
-      }
-      if (form.id === 'qa-form') {
-        var ev = pickEval(cache.current, route.week);
-        await CNRStore.saveQa({
-          evaluationId: ev.id,
-          score: document.getElementById('qa-score').value,
-          formUrl: document.getElementById('qa-form-url').value,
-          recordingUrl: document.getElementById('qa-recording').value
-        });
-        return navigate(profileHash(route.vaId, 'qa', ev.weekStart), 'QA saved.');
-      }
-      if (form.id === 'comp-form') {
-        var weekStart = form.dataset.week;
-        var current = (cache.current.evaluations || []).filter(function (ev) { return ev.weekStart === weekStart; })[0];
-        var input = { vaId: route.vaId, weekStart: weekStart };
-        COMPS.forEach(function (item) {
-          input[item[0]] = document.getElementById(item[0]).value;
-          input[item[1]] = document.getElementById(item[1]).value;
-        });
-        if (current) {
-          input.evaluationId = current.id;
-          await CNRStore.saveCompetencies(input);
-        } else {
-          await CNRStore.saveCompetenciesForWeek(input);
-        }
-        return navigate(profileHash(route.vaId, route.focus, weekStart), 'Grade saved.');
-      }
-      if (form.id === 'coach-form') {
-        await CNRStore.addCoaching({
-          vaId: route.vaId,
-          sessionDate: document.getElementById('coach-date').value,
-          topic: document.getElementById('coach-topic').value,
-          discussion: document.getElementById('coach-discussion').value,
-          action: document.getElementById('coach-action').value
-        });
-        return navigate(profileHash(route.vaId, 'feedback', ''), 'Session saved.');
       }
       if (form.id === 'status-form') {
         var nextStatus = document.getElementById('manual-status').value;
@@ -1468,21 +1442,23 @@
     }
   }
 
-  function openQaModal(va, weekStart) {
+  function openQaModal(va, qaId) {
     if (!va) return;
-    var choices = qaWeekChoices(va);
-    var selected = weekStart || choices.preferred;
-    var editing = !!weekStart;
-    var ev = (va.evaluations || []).filter(function (item) { return item.weekStart === selected; })[0];
-    var qa = ev && ev.qa ? ev.qa : {};
-    var options = choices.weeks.map(function (week) {
-      return '<option value="' + esc(week) + '"' + (week === selected ? ' selected' : '') + '>' + esc(CNRDates.weekRangeLabel(choices.anchor, week)) + '</option>';
-    }).join('');
-    var dis = editing ? ' disabled' : '';
+    var found = null;
+    var parent = null;
+    (va.evaluations || []).forEach(function (ev) {
+      if (ev.qa && ev.qa.id === qaId) {
+        found = ev.qa;
+        parent = ev;
+      }
+    });
+    var editing = !!found;
+    var from = editing ? (found.periodStart || (parent && parent.weekStart) || '') : CNRDates.todayISO();
+    var to = editing ? (found.periodEnd || (found.periodStart ? '' : (parent && parent.weekEnd) || '')) : '';
     var mod = document.getElementById('mod');
-    mod.innerHTML = '<form class="box" id="qa-modal" data-week="' + esc(selected) + '"><h2>' + (editing ? 'Edit QA' : 'Add QA') + '</h2><label class="field">Week<select id="qa-week"' + dis + '>' + options + '</select></label><label class="field">QA score<input id="qa-score" inputmode="decimal" required value="' + esc(qa.score == null ? '' : qa.score) + '"></label><label class="field">Evaluation form link<input id="qa-form-url" value="' + esc(qa.formUrl || '') + '"></label><label class="field">Call recording link<input id="qa-recording" value="' + esc(qa.recordingUrl || '') + '"></label><p id="mod-err" class="rename-err"></p><div class="actions"><button type="button" class="g" data-action="cancel-modal">Cancel</button><button type="submit">Save</button></div></form>';
+    mod.innerHTML = '<form class="box" id="qa-modal" data-id="' + (editing ? esc(found.id) : '') + '" data-new="' + (editing ? '0' : '1') + '"><h2>' + (editing ? 'Edit QA' : 'Add QA') + '</h2><div class="fields"><label class="field">From<input id="qa-from" type="date" required value="' + esc(from) + '"></label><label class="field">To<input id="qa-to" type="date" value="' + esc(to) + '"></label></div><label class="field">QA score<input id="qa-score" inputmode="decimal" required value="' + esc(editing && found.score != null ? found.score : '') + '"></label><label class="field">Evaluation form link<input id="qa-form-url" value="' + esc(editing ? found.formUrl || '' : '') + '"></label><label class="field">Call recording link<input id="qa-recording" value="' + esc(editing ? found.recordingUrl || '' : '') + '"></label><p id="mod-err" class="rename-err"></p><div class="actions"><button type="button" class="g" data-action="cancel-modal">Cancel</button><button type="submit">Save</button></div></form>';
     mod.style.display = 'flex';
-    (editing ? document.getElementById('qa-score') : document.getElementById('qa-week')).focus();
+    document.getElementById('qa-from').focus();
   }
 
   function openWbrModal(va, row) {
@@ -1508,18 +1484,81 @@
     var err = document.getElementById('mod-err');
     err.textContent = '';
     var route = readRoute();
-    var weekEl = document.getElementById('qa-week');
-    var week = (weekEl && weekEl.value) || form.dataset.week;
     try {
       await CNRStore.saveQaForWeek({
         vaId: route.vaId,
-        weekStart: week,
+        id: form.dataset.id || '',
+        asNew: form.dataset.new === '1',
+        periodStart: document.getElementById('qa-from').value,
+        periodEnd: document.getElementById('qa-to').value,
         score: document.getElementById('qa-score').value,
         formUrl: document.getElementById('qa-form-url').value,
         recordingUrl: document.getElementById('qa-recording').value
       });
       closeModal();
-      navigate(profileHash(route.vaId, 'qa', week), 'QA saved.');
+      navigate(profileHash(route.vaId, 'qa', route.week), 'QA saved.');
+    } catch (ex) {
+      err.textContent = ex.message || 'Something went wrong.';
+    }
+  }
+
+  function openCompModal(va, focus, row) {
+    if (!va || !COMP_BY_FOCUS[focus]) return;
+    var name = COMP_BY_FOCUS[focus][2];
+    var editing = !!row;
+    var mod = document.getElementById('mod');
+    mod.innerHTML = '<form class="box" id="comp-modal" data-id="' + (editing ? esc(row.id) : '') + '" data-focus="' + esc(focus) + '" data-prev="' + (editing ? esc(row.entryDate) : '') + '"><h2>' + (editing ? 'Edit ' : 'Add ') + esc(name) + '</h2><label class="field">Date<input id="comp-date" type="date" required value="' + esc(editing ? row.entryDate : CNRDates.todayISO()) + '"></label><label class="field">Score<input id="comp-score" inputmode="decimal" required value="' + esc(editing ? field(row.score) : '') + '"></label><label class="field">Comment<textarea id="comp-comment">' + esc(editing ? row.comment || '' : '') + '</textarea></label><p id="mod-err" class="rename-err"></p><div class="actions"><button type="button" class="g" data-action="cancel-modal">Cancel</button><button type="submit">Save</button></div></form>';
+    mod.style.display = 'flex';
+    document.getElementById('comp-date').focus();
+  }
+
+  async function saveCompModal(form) {
+    var err = document.getElementById('mod-err');
+    err.textContent = '';
+    var route = readRoute();
+    var focus = form.dataset.focus;
+    var key = COMP_BY_FOCUS[focus] && COMP_BY_FOCUS[focus][0];
+    try {
+      await CNRStore.saveCompetencyEntry({
+        id: form.dataset.id || '',
+        vaId: route.vaId,
+        competency: key,
+        entryDate: document.getElementById('comp-date').value,
+        previousDate: form.dataset.prev || '',
+        score: document.getElementById('comp-score').value,
+        comment: document.getElementById('comp-comment').value
+      });
+      closeModal();
+      navigate(profileHash(route.vaId, focus, route.week), 'Entry saved.');
+    } catch (ex) {
+      err.textContent = ex.message || 'Something went wrong.';
+    }
+  }
+
+  function openCoachModal(va, row) {
+    if (!va) return;
+    var editing = !!row;
+    var mod = document.getElementById('mod');
+    mod.innerHTML = '<form class="box" id="coach-modal" data-id="' + (editing ? esc(row.id) : '') + '"><h2>' + (editing ? 'Edit feedback' : 'Add feedback') + '</h2><div class="fields"><label class="field">Date<input id="coach-date" type="date" required value="' + esc(editing ? row.sessionDate : CNRDates.todayISO()) + '"></label><label class="field">Topic<input id="coach-topic" required value="' + esc(editing ? row.topic : '') + '"></label></div><label class="field">What was discussed<textarea id="coach-discussion" required>' + esc(editing ? row.discussion : '') + '</textarea></label><label class="field">Action<textarea id="coach-action" required>' + esc(editing ? row.action : '') + '</textarea></label><p id="mod-err" class="rename-err"></p><div class="actions"><button type="button" class="g" data-action="cancel-modal">Cancel</button><button type="submit">Save</button></div></form>';
+    mod.style.display = 'flex';
+    document.getElementById('coach-date').focus();
+  }
+
+  async function saveCoachModal(form) {
+    var err = document.getElementById('mod-err');
+    err.textContent = '';
+    var route = readRoute();
+    try {
+      await CNRStore.addCoaching({
+        id: form.dataset.id || '',
+        vaId: route.vaId,
+        sessionDate: document.getElementById('coach-date').value,
+        topic: document.getElementById('coach-topic').value,
+        discussion: document.getElementById('coach-discussion').value,
+        action: document.getElementById('coach-action').value
+      });
+      closeModal();
+      navigate(profileHash(route.vaId, 'feedback', ''), 'Session saved.');
     } catch (ex) {
       err.textContent = ex.message || 'Something went wrong.';
     }
@@ -1547,11 +1586,13 @@
 
   async function onModalSubmit(event) {
     var form = event.target;
-    if (!form || (form.id !== 'va-form' && form.id !== 'import-form' && form.id !== 'att-form' && form.id !== 'qa-modal' && form.id !== 'wbr-form')) return;
+    if (!form || (form.id !== 'va-form' && form.id !== 'import-form' && form.id !== 'att-form' && form.id !== 'qa-modal' && form.id !== 'wbr-form' && form.id !== 'comp-modal' && form.id !== 'coach-modal')) return;
     event.preventDefault();
     if (form.id === 'att-form') return saveAttendanceModal(form);
     if (form.id === 'qa-modal') return saveQaModal(form);
     if (form.id === 'wbr-form') return saveWbrModal(form);
+    if (form.id === 'comp-modal') return saveCompModal(form);
+    if (form.id === 'coach-modal') return saveCoachModal(form);
     if (form.id === 'import-form') {
       var importErr = document.getElementById('mod-err');
       importErr.textContent = '';

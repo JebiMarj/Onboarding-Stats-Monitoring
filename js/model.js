@@ -25,6 +25,7 @@
       qa: [],
       wbrDays: [],
       competencies: [],
+      competencyEntries: [],
       coaching: [],
       history: [],
       settings: {
@@ -159,6 +160,31 @@
     });
   }
 
+  var COMPETENCY_COMMENT = {
+    toolNavigation: 'toolNavigationComment',
+    communication: 'communicationComment',
+    criticalThinking: 'criticalThinkingComment',
+    coreValues: 'coreValuesComment'
+  };
+
+  function newestEntry(a, b) {
+    if (a.entryDate !== b.entryDate) return a.entryDate < b.entryDate ? 1 : -1;
+    var as = a.updatedAt || a.createdAt || '';
+    var bs = b.updatedAt || b.createdAt || '';
+    if (as !== bs) return as < bs ? 1 : -1;
+    if ((a.id || '') !== (b.id || '')) return a.id < b.id ? 1 : -1;
+    return 0;
+  }
+
+  function competencyScore(state, ev, key, fallback) {
+    var entries = (state.competencyEntries || []).filter(function (row) {
+      return row.vaId === ev.vaId && row.competency === key && inWeek(row.entryDate, ev.weekStart);
+    });
+    if (!entries.length) return fallback;
+    entries.sort(newestEntry);
+    return entries[0].score;
+  }
+
   function computeSnapshot(state, evaluationId) {
     var ev = findEval(state, evaluationId);
     if (!ev) return null;
@@ -175,10 +201,10 @@
       attendance: Score.weeklyAttendance(daily),
       conversion: wbr ? Score.conversionRate(wbr.totalLeads, wbr.convertedLeads) : null,
       qa: qa ? qa.score : null,
-      tool_navigation: comp ? comp.toolNavigation : null,
-      communication: comp ? comp.communication : null,
-      critical_thinking: comp ? comp.criticalThinking : null,
-      core_values: comp ? comp.coreValues : null
+      tool_navigation: competencyScore(state, ev, 'toolNavigation', comp ? comp.toolNavigation : null),
+      communication: competencyScore(state, ev, 'communication', comp ? comp.communication : null),
+      critical_thinking: competencyScore(state, ev, 'criticalThinking', comp ? comp.criticalThinking : null),
+      core_values: competencyScore(state, ev, 'coreValues', comp ? comp.coreValues : null)
     };
     return Score.scoreEvaluation({
       scores: scores,
@@ -242,6 +268,9 @@
         .filter(function (row) { return row.vaId === va.id; })
         .sort(function (a, b) { return a.workDate < b.workDate ? -1 : 1; }),
       evaluations: evaluations,
+      competencyEntries: (state.competencyEntries || [])
+        .filter(function (row) { return row.vaId === va.id; })
+        .sort(newestEntry),
       coaching: state.coaching
         .filter(function (row) { return row.vaId === va.id; })
         .sort(function (a, b) { return (a.sessionDate + a.createdAt) < (b.sessionDate + b.createdAt) ? 1 : -1; }),
@@ -564,22 +593,58 @@
     return { ok: true, state: next, evaluation: ev };
   }
 
+  function applyQaPeriod(row, input) {
+    var hasStart = Object.prototype.hasOwnProperty.call(input, 'periodStart');
+    var hasEnd = Object.prototype.hasOwnProperty.call(input, 'periodEnd');
+    if (!hasStart && !hasEnd) return '';
+    if (hasStart) {
+      var start = text(input.periodStart);
+      if (!Dates.isRealDate(start)) return 'Enter a From date.';
+      row.periodStart = start;
+    }
+    if (hasEnd) {
+      var end = text(input.periodEnd);
+      if (end && !Dates.isRealDate(end)) return 'Enter a To date, or leave it blank.';
+      row.periodEnd = end;
+    }
+    if (row.periodStart && row.periodEnd && row.periodEnd < row.periodStart) return 'To is earlier than From.';
+    return '';
+  }
+
   function saveQa(state, actor, input) {
     var denied = gate(actor, 'qa');
     if (denied) return fail(denied);
-    var open = requireOpen(state, input && input.evaluationId);
+    var src = input || {};
+    var open = requireOpen(state, src.evaluationId);
     if (open.error) return fail(open.error);
-    var score = scoreOrNull(input.score);
+    var score = scoreOrNull(src.score);
     if (!score.ok || score.n == null) return fail('Enter a QA score from 0 to 100.');
-    var form = cleanUrl(input.formUrl);
-    var recording = cleanUrl(input.recordingUrl);
+    var form = cleanUrl(src.formUrl);
+    var recording = cleanUrl(src.recordingUrl);
     if (!form.ok || !recording.ok) return fail('Use an http or https link, or leave the link blank.');
     var next = clone(state);
-    var row = next.qa.find(function (item) { return item.evaluationId === input.evaluationId; });
-    if (!row) {
-      row = { id: uid(), evaluationId: input.evaluationId };
-      next.qa.push(row);
+    var row = null;
+    if (src.qaId) {
+      row = next.qa.find(function (item) { return item.id === src.qaId; });
+      if (!row) return fail('QA score not found.');
+      var oldOpen = requireOpen(next, row.evaluationId);
+      if (oldOpen.error) return fail(oldOpen.error);
+      if (row.evaluationId !== src.evaluationId) {
+        var moving = next.qa.find(function (item) {
+          return item.evaluationId === src.evaluationId && item.id !== row.id;
+        });
+        if (moving) return fail('A QA score already exists for the week of that From date.');
+        row.evaluationId = src.evaluationId;
+      }
+    } else {
+      row = next.qa.find(function (item) { return item.evaluationId === src.evaluationId; });
+      if (!row) {
+        row = { id: uid(), evaluationId: src.evaluationId };
+        next.qa.push(row);
+      }
     }
+    var periodError = applyQaPeriod(row, src);
+    if (periodError) return fail(periodError);
     row.score = score.n;
     row.formUrl = form.url;
     row.recordingUrl = recording.url;
@@ -590,14 +655,45 @@
   function saveQaForWeek(state, actor, input) {
     var denied = gate(actor, 'qa');
     if (denied) return fail(denied);
-    var opened = recordOpenWeek(state, actor, input);
+    var src = input || {};
+    var dated = Object.prototype.hasOwnProperty.call(src, 'periodStart');
+    var from = dated ? text(src.periodStart) : src.weekStart;
+    if (dated && !Dates.isRealDate(from)) return fail('Enter a From date.');
+    var to = text(src.periodEnd);
+    if (to && !Dates.isRealDate(to)) return fail('Enter a To date, or leave it blank.');
+    if (dated && to && to < from) return fail('To is earlier than From.');
+    var weekStart = Dates.mondayOf(from);
+    if (!weekStart) return fail(dated ? 'Enter a From date.' : 'Weeks start on Monday.');
+    var opened = recordOpenWeek(state, actor, { vaId: src.vaId, weekStart: weekStart });
     if (!opened.ok) return opened;
-    return saveQa(opened.state, actor, {
+    if (src.asNew) {
+      var taken = (opened.state.qa || []).find(function (row) {
+        return row.evaluationId === opened.evaluation.id;
+      });
+      if (taken) return fail('A QA score already exists for the week of that From date.');
+    }
+    if (src.id) {
+      var current = (opened.state.qa || []).find(function (row) { return row.id === src.id; });
+      if (!current) return fail('QA score not found.');
+      if (current.evaluationId !== opened.evaluation.id) {
+        var clash = (opened.state.qa || []).find(function (row) {
+          return row.evaluationId === opened.evaluation.id && row.id !== current.id;
+        });
+        if (clash) return fail('A QA score already exists for the week of that From date.');
+      }
+    }
+    var payload = {
       evaluationId: opened.evaluation.id,
-      score: input.score,
-      formUrl: input.formUrl,
-      recordingUrl: input.recordingUrl
-    });
+      qaId: src.id || '',
+      score: src.score,
+      formUrl: src.formUrl,
+      recordingUrl: src.recordingUrl
+    };
+    if (dated) {
+      payload.periodStart = from;
+      payload.periodEnd = to;
+    }
+    return saveQa(opened.state, actor, payload);
   }
 
   function deleteQa(state, actor, input) {
@@ -729,6 +825,106 @@
     return { ok: true, state: next };
   }
 
+  function blankCompetency(evaluationId, actor) {
+    return {
+      id: uid(),
+      evaluationId: evaluationId,
+      toolNavigation: null,
+      toolNavigationComment: '',
+      communication: null,
+      communicationComment: '',
+      criticalThinking: null,
+      criticalThinkingComment: '',
+      coreValues: null,
+      coreValuesComment: '',
+      updatedBy: actor.id
+    };
+  }
+
+  function syncWeeklyCompetency(state, vaId, key, weekStart, actor) {
+    if (!weekStart || !COMPETENCY_COMMENT[key]) return;
+    var ev = state.evaluations.find(function (item) {
+      return item.vaId === vaId && item.weekStart === weekStart;
+    });
+    if (!ev || ev.status === 'closed') return;
+    var latest = (state.competencyEntries || []).filter(function (row) {
+      return row.vaId === vaId && row.competency === key && inWeek(row.entryDate, weekStart);
+    }).sort(newestEntry)[0] || null;
+    var comp = state.competencies.find(function (row) { return row.evaluationId === ev.id; });
+    if (!latest && !comp) return;
+    if (!comp) {
+      comp = blankCompetency(ev.id, actor);
+      state.competencies.push(comp);
+    }
+    comp[key] = latest ? latest.score : null;
+    comp[COMPETENCY_COMMENT[key]] = latest ? (latest.comment || '') : '';
+    comp.updatedBy = actor.id;
+  }
+
+  function saveCompetencyEntry(state, actor, input) {
+    var denied = gate(actor, 'competencies');
+    if (denied) return fail(denied);
+    var src = input || {};
+    if (!findVa(state, src.vaId)) return fail('VA not found.');
+    if (!COMPETENCY_COMMENT[src.competency]) return fail('Choose a competency.');
+    if (!Dates.isRealDate(src.entryDate)) return fail('Enter a date.');
+    var score = scoreOrNull(src.score);
+    if (!score.ok || score.n == null) return fail('Enter a score from 0 to 100.');
+    if (closedWeekCovers(state, src.vaId, src.entryDate)) return fail('That day is in a closed week.');
+    var opened = recordOpenWeek(state, actor, { vaId: src.vaId, weekStart: Dates.mondayOf(src.entryDate) });
+    if (!opened.ok) return opened;
+    var next = clone(opened.state);
+    if (!next.competencyEntries) next.competencyEntries = [];
+    var row = null;
+    var previousDate = '';
+    if (src.id) {
+      row = next.competencyEntries.find(function (item) { return item.id === src.id; });
+      if (!row || row.vaId !== src.vaId || row.competency !== src.competency) return fail('Competency entry not found.');
+      if (closedWeekCovers(next, row.vaId, row.entryDate)) return fail('That day is in a closed week.');
+      previousDate = row.entryDate;
+      row.entryDate = src.entryDate;
+      row.score = score.n;
+      row.comment = text(src.comment);
+      row.updatedAt = new Date().toISOString();
+      row.updatedBy = actor.id;
+    } else {
+      var stamp = new Date().toISOString();
+      row = {
+        id: uid(),
+        vaId: src.vaId,
+        competency: src.competency,
+        entryDate: src.entryDate,
+        score: score.n,
+        comment: text(src.comment),
+        createdBy: actor.id,
+        createdAt: stamp,
+        updatedAt: stamp,
+        updatedBy: actor.id
+      };
+      next.competencyEntries.push(row);
+    }
+    syncWeeklyCompetency(next, src.vaId, src.competency, Dates.mondayOf(src.entryDate), actor);
+    if (previousDate && Dates.mondayOf(previousDate) !== Dates.mondayOf(src.entryDate)) {
+      syncWeeklyCompetency(next, src.vaId, src.competency, Dates.mondayOf(previousDate), actor);
+    }
+    return { ok: true, state: next, entry: row };
+  }
+
+  function deleteCompetencyEntry(state, actor, input) {
+    var denied = gate(actor, 'competencies');
+    if (denied) return fail(denied);
+    var next = clone(state);
+    var row = (next.competencyEntries || []).find(function (item) { return item.id === (input && input.id); });
+    if (!row) return fail('Competency entry not found.');
+    if (closedWeekCovers(next, row.vaId, row.entryDate)) return fail('That day is in a closed week.');
+    var weekStart = Dates.mondayOf(row.entryDate);
+    var key = row.competency;
+    var vaId = row.vaId;
+    next.competencyEntries = next.competencyEntries.filter(function (item) { return item.id !== row.id; });
+    syncWeeklyCompetency(next, vaId, key, weekStart, actor);
+    return { ok: true, state: next };
+  }
+
   function addCoaching(state, actor, input) {
     var denied = gate(actor, 'coaching');
     if (denied) return fail(denied);
@@ -738,6 +934,16 @@
       return fail('Enter the coaching date, topic, discussion, and action.');
     }
     var next = clone(state);
+    if (src.id) {
+      var existing = next.coaching.find(function (row) { return row.id === src.id; });
+      if (!existing || existing.vaId !== src.vaId) return fail('Coaching session not found.');
+      existing.sessionDate = src.sessionDate;
+      existing.topic = text(src.topic);
+      existing.discussion = text(src.discussion);
+      existing.action = text(src.action);
+      existing.updatedBy = actor.id;
+      return { ok: true, state: next, coaching: existing };
+    }
     var row = {
       id: uid(),
       vaId: src.vaId,
@@ -898,6 +1104,8 @@
     saveCompetencies: saveCompetencies,
     saveCompetenciesForWeek: saveCompetenciesForWeek,
     deleteCompetencies: deleteCompetencies,
+    saveCompetencyEntry: saveCompetencyEntry,
+    deleteCompetencyEntry: deleteCompetencyEntry,
     addCoaching: addCoaching,
     deleteCoaching: deleteCoaching,
     closeEvaluation: closeEvaluation,

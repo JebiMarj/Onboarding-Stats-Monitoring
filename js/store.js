@@ -59,6 +59,7 @@
           };
         }
         if (!Array.isArray(state.wbrDays)) state.wbrDays = [];
+        if (!Array.isArray(state.competencyEntries)) state.competencyEntries = [];
         return;
       }
     } catch (err) { /* start fresh */ }
@@ -100,8 +101,50 @@
       evaluationId: row.evaluation_id,
       score: num(row.score),
       formUrl: row.form_url || '',
-      recordingUrl: row.recording_url || ''
+      recordingUrl: row.recording_url || '',
+      periodStart: row.period_start || '',
+      periodEnd: row.period_end || ''
     };
+  }
+
+  var COMP_SNAKE = {
+    toolNavigation: 'tool_navigation',
+    criticalThinking: 'critical_thinking',
+    communication: 'communication',
+    coreValues: 'core_values'
+  };
+  var COMP_CAMEL = {
+    tool_navigation: 'toolNavigation',
+    critical_thinking: 'criticalThinking',
+    communication: 'communication',
+    core_values: 'coreValues'
+  };
+
+  function schemaMissing(error, token) {
+    var message = ((error && error.message) || '') + ' ' + ((error && error.details) || '') + ' ' + ((error && error.code) || '');
+    if (!/PGRST204|PGRST205|42P01|schema cache|does not exist|Could not find/i.test(message)) return false;
+    return !token || message.toLowerCase().indexOf(String(token).toLowerCase()) !== -1;
+  }
+
+  function mapEntry(row) {
+    return {
+      id: row.id,
+      vaId: row.va_id,
+      competency: COMP_CAMEL[row.competency] || row.competency,
+      entryDate: row.entry_date,
+      score: num(row.score),
+      comment: row.comment || '',
+      createdAt: row.created_at || '',
+      updatedAt: row.updated_at || ''
+    };
+  }
+
+  function newestEntry(a, b) {
+    if (a.entryDate !== b.entryDate) return a.entryDate < b.entryDate ? 1 : -1;
+    var as = a.updatedAt || a.createdAt || '';
+    var bs = b.updatedAt || b.createdAt || '';
+    if (as !== bs) return as < bs ? 1 : -1;
+    return 0;
   }
 
   function mapWbrDay(row) {
@@ -211,6 +254,7 @@
       }).sort(function (a, b) { return a.workDate < b.workDate ? -1 : 1; }),
       wbrDays: wbrDays,
       evaluations: evaluations,
+      competencyEntries: [],
       coaching: (row.coaching_sessions || []).map(function (item) {
         return {
           id: item.id,
@@ -248,6 +292,71 @@
       }
     }
     return va;
+  }
+
+  async function loadCompetencyEntries(vaId) {
+    var res = await sb().from('competency_entries').select('id, va_id, competency, entry_date, score, comment, created_at, updated_at').eq('va_id', vaId);
+    if (res.error) {
+      if (schemaMissing(res.error, 'competency_entries')) return [];
+      raise(res.error);
+    }
+    return (res.data || []).map(mapEntry).sort(newestEntry);
+  }
+
+  async function ensureOpenEvaluation(vaId, weekStart) {
+    var week = root.CNRDates.mondayOf(weekStart);
+    if (!week) throw new Error('Weeks start on Monday.');
+    var found = await sb().from('weekly_evaluations').select('id, status').eq('va_id', vaId).eq('week_start', week).maybeSingle();
+    if (found.error) raise(found.error);
+    if (found.data && found.data.status === 'closed') throw new Error('This week is closed and its scores cannot be changed.');
+    if (found.data) return found.data.id;
+    if (session && session.role === 'qa') throw new Error('An onboarder needs to start this week before a QA score can be saved.');
+    var created = await sb().from('weekly_evaluations').insert({
+      va_id: vaId,
+      week_start: week,
+      status: 'open'
+    }).select('id').single();
+    if (created.error) {
+      if (session && session.role === 'qa') throw new Error('An onboarder needs to start this week before a QA score can be saved.');
+      if (/duplicate|unique/i.test(created.error.message || '')) {
+        var again = await sb().from('weekly_evaluations').select('id, status').eq('va_id', vaId).eq('week_start', week).maybeSingle();
+        if (again.error) raise(again.error);
+        if (again.data && again.data.status === 'closed') throw new Error('This week is closed and its scores cannot be changed.');
+        if (again.data) return again.data.id;
+      }
+      raise(created.error);
+    }
+    return created.data.id;
+  }
+
+  async function syncCompetencyWeek(vaId, competency, entryDate) {
+    var week = root.CNRDates.mondayOf(entryDate);
+    if (!week) return;
+    var snake = COMP_SNAKE[competency];
+    if (!snake) return;
+    var found = await sb().from('weekly_evaluations').select('id, status').eq('va_id', vaId).eq('week_start', week).maybeSingle();
+    if (found.error) raise(found.error);
+    if (!found.data || found.data.status === 'closed') return;
+    var rows = await sb().from('competency_entries').select('entry_date, score, comment, created_at, updated_at').eq('va_id', vaId).eq('competency', snake);
+    if (rows.error) {
+      if (schemaMissing(rows.error, 'competency_entries')) return;
+      raise(rows.error);
+    }
+    var end = root.CNRDates.addDays(week, 6);
+    var inWeek = (rows.data || []).filter(function (row) {
+      return row.entry_date >= week && row.entry_date <= end;
+    }).sort(function (a, b) {
+      if (a.entry_date !== b.entry_date) return a.entry_date < b.entry_date ? 1 : -1;
+      var as = a.updated_at || a.created_at || '';
+      var bs = b.updated_at || b.created_at || '';
+      return as < bs ? 1 : as > bs ? -1 : 0;
+    });
+    var latest = inWeek[0] || null;
+    var patch = { evaluation_id: found.data.id };
+    patch[snake] = latest ? latest.score : null;
+    patch[snake + '_comment'] = latest && latest.comment ? latest.comment : null;
+    var saved = await sb().from('weekly_competencies').upsert(patch, { onConflict: 'evaluation_id' });
+    if (saved.error) raise(saved.error);
   }
 
   var api = {
@@ -330,7 +439,9 @@
       if (!res.data) throw new Error('VA not found.');
       var people = await sb().from('profiles').select('id, full_name, email');
       if (people.error) raise(people.error);
-      return fillOpenScores(mapVa(res.data, peopleMap(people.data)));
+      var mapped = mapVa(res.data, peopleMap(people.data));
+      mapped.competencyEntries = await loadCompetencyEntries(id);
+      return fillOpenScores(mapped);
     },
     async listBatches() {
       if (mock) {
@@ -441,42 +552,55 @@
     },
     async saveQa(input) {
       if (mock) return apply(function (current, actor) { return root.CNRModel.saveQa(current, actor, input); });
-      var res = await sb().from('weekly_qa').upsert({
+      var payload = {
         evaluation_id: input.evaluationId,
         score: input.score,
         form_url: input.formUrl || null,
         recording_url: input.recordingUrl || null
-      }, { onConflict: 'evaluation_id' });
-      if (res.error) raise(res.error);
+      };
+      if (Object.prototype.hasOwnProperty.call(input, 'periodStart')) payload.period_start = input.periodStart || null;
+      if (Object.prototype.hasOwnProperty.call(input, 'periodEnd')) payload.period_end = input.periodEnd || null;
+      var res = input.qaId
+        ? await sb().from('weekly_qa').update(payload).eq('id', input.qaId)
+        : await sb().from('weekly_qa').upsert(payload, { onConflict: 'evaluation_id' });
+      if (res.error) {
+        if (schemaMissing(res.error, 'period_')) throw new Error('QA dates cannot be saved until the database update is applied.');
+        if (/weekly_qa_period_order|check constraint/i.test(res.error.message || '') && /period/i.test(res.error.message || '')) {
+          throw new Error('To is earlier than From.');
+        }
+        raise(res.error);
+      }
     },
     async saveQaForWeek(input) {
       if (mock) return apply(function (current, actor) { return root.CNRModel.saveQaForWeek(current, actor, input); });
-      var week = root.CNRDates.mondayOf(input.weekStart);
-      if (!week) throw new Error('Weeks start on Monday.');
-      var found = await sb().from('weekly_evaluations').select('id, status').eq('va_id', input.vaId).eq('week_start', week).maybeSingle();
-      if (found.error) raise(found.error);
-      var evaluationId = found.data && found.data.id;
-      if (found.data && found.data.status === 'closed') throw new Error('This week is closed and its scores cannot be changed.');
-      if (!evaluationId) {
-        if (session.role === 'qa') throw new Error('An onboarder needs to start this week before a QA score can be saved.');
-        var created = await sb().from('weekly_evaluations').insert({
-          va_id: input.vaId,
-          week_start: week,
-          status: 'open'
-        }).select('id').single();
-        if (created.error) {
-          if (session.role === 'qa') throw new Error('An onboarder needs to start this week before a QA score can be saved.');
-          if (/duplicate|unique/i.test(created.error.message || '')) throw new Error('That week cannot be added while another week is open.');
-          raise(created.error);
+      var dated = Object.prototype.hasOwnProperty.call(input, 'periodStart');
+      var from = dated ? String(input.periodStart || '').trim() : input.weekStart;
+      if (dated && !root.CNRDates.isRealDate(from)) throw new Error('Enter a From date.');
+      var to = input.periodEnd ? String(input.periodEnd).trim() : '';
+      if (to && !root.CNRDates.isRealDate(to)) throw new Error('Enter a To date, or leave it blank.');
+      if (dated && to && to < from) throw new Error('To is earlier than From.');
+      var week = root.CNRDates.mondayOf(from);
+      if (!week) throw new Error(dated ? 'Enter a From date.' : 'Weeks start on Monday.');
+      var evaluationId = await ensureOpenEvaluation(input.vaId, week);
+      if (input.asNew || input.id) {
+        var existing = await sb().from('weekly_qa').select('id').eq('evaluation_id', evaluationId).maybeSingle();
+        if (existing.error) raise(existing.error);
+        if (existing.data && (input.asNew || existing.data.id !== input.id)) {
+          throw new Error('A QA score already exists for the week of that From date.');
         }
-        evaluationId = created.data.id;
       }
-      return api.saveQa({
+      var payload = {
         evaluationId: evaluationId,
+        qaId: input.id || '',
         score: input.score,
         formUrl: input.formUrl,
         recordingUrl: input.recordingUrl
-      });
+      };
+      if (dated) {
+        payload.periodStart = from;
+        payload.periodEnd = to;
+      }
+      return api.saveQa(payload);
     },
     async deleteQa(evaluationId) {
       if (mock) return apply(function (current, actor) { return root.CNRModel.deleteQa(current, actor, { evaluationId: evaluationId }); });
@@ -556,15 +680,79 @@
       var res = await sb().from('weekly_competencies').delete().eq('evaluation_id', evaluationId);
       if (res.error) raise(res.error);
     },
+    async saveCompetencyEntry(input) {
+      if (mock) return apply(function (current, actor) { return root.CNRModel.saveCompetencyEntry(current, actor, input); });
+      if (!root.CNRDates.isRealDate(input.entryDate)) throw new Error('Enter a date.');
+      var score = Number(input.score);
+      if (input.score == null || input.score === '' || !Number.isFinite(score) || score < 0 || score > 100) {
+        throw new Error('Enter a score from 0 to 100.');
+      }
+      var snake = COMP_SNAKE[input.competency];
+      if (!snake) throw new Error('Choose a competency.');
+      var week = root.CNRDates.mondayOf(input.entryDate);
+      var found = await sb().from('weekly_evaluations').select('id, status').eq('va_id', input.vaId).eq('week_start', week).maybeSingle();
+      if (found.error) raise(found.error);
+      if (found.data && found.data.status === 'closed') throw new Error('That day is in a closed week.');
+      if (input.id && input.previousDate && root.CNRDates.mondayOf(input.previousDate) !== week) {
+        var oldWeek = root.CNRDates.mondayOf(input.previousDate);
+        var oldFound = await sb().from('weekly_evaluations').select('status').eq('va_id', input.vaId).eq('week_start', oldWeek).maybeSingle();
+        if (oldFound.error) raise(oldFound.error);
+        if (oldFound.data && oldFound.data.status === 'closed') throw new Error('That day is in a closed week.');
+      }
+      var payload = {
+        va_id: input.vaId,
+        competency: snake,
+        entry_date: input.entryDate,
+        score: score,
+        comment: String(input.comment || '').trim() || null
+      };
+      var res = input.id
+        ? await sb().from('competency_entries').update(payload).eq('id', input.id)
+        : await sb().from('competency_entries').insert(payload);
+      if (res.error) {
+        if (schemaMissing(res.error, 'competency_entries')) {
+          throw new Error('Competency entries cannot be saved until the database update is applied.');
+        }
+        if (/closed week/i.test(res.error.message || '')) throw new Error('That day is in a closed week.');
+        raise(res.error);
+      }
+      if (!found.data) await ensureOpenEvaluation(input.vaId, week);
+      await syncCompetencyWeek(input.vaId, input.competency, input.entryDate);
+      if (input.previousDate && root.CNRDates.mondayOf(input.previousDate) !== week) {
+        await syncCompetencyWeek(input.vaId, input.competency, input.previousDate);
+      }
+    },
+    async deleteCompetencyEntry(input) {
+      if (mock) return apply(function (current, actor) { return root.CNRModel.deleteCompetencyEntry(current, actor, input); });
+      var res = await sb().from('competency_entries').delete().eq('id', input.id);
+      if (res.error) {
+        if (schemaMissing(res.error, 'competency_entries')) {
+          throw new Error('Competency entries cannot be saved until the database update is applied.');
+        }
+        if (/closed week/i.test(res.error.message || '')) throw new Error('That day is in a closed week.');
+        raise(res.error);
+      }
+      if (input.vaId && input.competency && input.entryDate) {
+        await syncCompetencyWeek(input.vaId, input.competency, input.entryDate);
+      }
+    },
     async addCoaching(input) {
       if (mock) return apply(function (current, actor) { return root.CNRModel.addCoaching(current, actor, input); });
-      var res = await sb().from('coaching_sessions').insert({
+      var payload = {
         va_id: input.vaId,
         session_date: input.sessionDate,
         topic: input.topic,
         discussion: input.discussion,
         action: input.action
-      });
+      };
+      var res = input.id
+        ? await sb().from('coaching_sessions').update({
+          session_date: input.sessionDate,
+          topic: input.topic,
+          discussion: input.discussion,
+          action: input.action
+        }).eq('id', input.id)
+        : await sb().from('coaching_sessions').insert(payload);
       if (res.error) raise(res.error);
     },
     async deleteCoaching(id) {

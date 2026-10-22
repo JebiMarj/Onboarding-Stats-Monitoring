@@ -213,10 +213,15 @@ create table public.weekly_qa (
   score numeric not null check (score >= 0 and score <= 100),
   form_url text,
   recording_url text,
+  period_start date,
+  period_end date,
   created_by uuid references public.profiles (id) on delete set null,
   created_at timestamptz not null default now(),
   updated_by uuid references public.profiles (id) on delete set null,
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint weekly_qa_period_order check (
+    period_end is null or period_start is null or period_end >= period_start
+  )
 );
 
 create table public.wbr_days (
@@ -263,6 +268,26 @@ create table public.coaching_sessions (
 );
 
 create index coaching_sessions_va_idx on public.coaching_sessions (va_id, session_date);
+
+-- Several dated scores per competency. The week score still copies the latest
+-- in-week row onto weekly_competencies so the stored KPI formula stays put.
+create table public.competency_entries (
+  id uuid primary key default gen_random_uuid(),
+  va_id uuid not null references public.va_profiles (id) on delete cascade,
+  competency text not null check (competency in (
+    'tool_navigation', 'critical_thinking', 'communication', 'core_values'
+  )),
+  entry_date date not null,
+  score numeric not null check (score >= 0 and score <= 100),
+  comment text,
+  created_by uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_by uuid references public.profiles (id) on delete set null,
+  updated_at timestamptz not null default now()
+);
+
+create index competency_entries_va_idx
+  on public.competency_entries (va_id, competency, entry_date);
 
 create table public.status_history (
   id uuid primary key default gen_random_uuid(),
@@ -352,6 +377,8 @@ create trigger wbr_days_stamp before insert or update on public.wbr_days
 create trigger weekly_competencies_stamp before insert or update on public.weekly_competencies
   for each row execute function public.stamp_writer();
 create trigger coaching_sessions_stamp before insert or update on public.coaching_sessions
+  for each row execute function public.stamp_writer();
+create trigger competency_entries_stamp before insert or update on public.competency_entries
   for each row execute function public.stamp_writer();
 
 -- Reject endorsement statuses before the row exists. History is written after
@@ -537,6 +564,54 @@ create trigger wbr_days_freeze
 create trigger weekly_competencies_freeze
   before insert or update or delete on public.weekly_competencies
   for each row execute function public.freeze_closed_evaluation_child();
+
+create or replace function public.freeze_closed_competency_entry()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_va uuid;
+  target_day date;
+begin
+  if TG_OP = 'DELETE' then
+    target_va := old.va_id;
+    target_day := old.entry_date;
+  else
+    target_va := new.va_id;
+    target_day := new.entry_date;
+  end if;
+  if TG_OP = 'UPDATE' and old.entry_date is distinct from new.entry_date then
+    if exists (
+      select 1 from public.weekly_evaluations e
+      where e.va_id = old.va_id
+        and e.status = 'closed'
+        and old.entry_date >= e.week_start
+        and old.entry_date < e.week_start + 7
+    ) then
+      raise exception 'That day is in a closed week.';
+    end if;
+  end if;
+  if exists (
+    select 1 from public.weekly_evaluations e
+    where e.va_id = target_va
+      and e.status = 'closed'
+      and target_day >= e.week_start
+      and target_day < e.week_start + 7
+  ) then
+    raise exception 'That day is in a closed week.';
+  end if;
+  if TG_OP = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end
+$$;
+
+create trigger competency_entries_freeze
+  before insert or update or delete on public.competency_entries
+  for each row execute function public.freeze_closed_competency_entry();
 
 -- ---------------------------------------------------------------------------
 -- KPI. Keep this formula aligned with js/score.js.
@@ -895,7 +970,7 @@ begin
   foreach t in array array[
     'profiles', 'batches', 'va_profiles', 'attendance_days', 'weekly_evaluations',
     'weekly_qa', 'wbr_days', 'weekly_competencies', 'coaching_sessions',
-    'status_history', 'app_settings'
+    'competency_entries', 'status_history', 'app_settings'
   ]
   loop
     execute format('alter table public.%I enable row level security', t);
@@ -1000,6 +1075,18 @@ create policy weekly_competencies_delete on public.weekly_competencies
   for delete to authenticated
   using (public.app_role() in ('admin', 'onboarder'));
 
+grant insert, update, delete on public.competency_entries to authenticated;
+create policy competency_entries_insert on public.competency_entries
+  for insert to authenticated
+  with check (public.app_role() in ('admin', 'onboarder'));
+create policy competency_entries_update on public.competency_entries
+  for update to authenticated
+  using (public.app_role() in ('admin', 'onboarder'))
+  with check (public.app_role() in ('admin', 'onboarder'));
+create policy competency_entries_delete on public.competency_entries
+  for delete to authenticated
+  using (public.app_role() in ('admin', 'onboarder'));
+
 grant insert, update, delete on public.coaching_sessions to authenticated;
 create policy coaching_sessions_insert on public.coaching_sessions
   for insert to authenticated
@@ -1034,6 +1121,7 @@ revoke all on function public.va_status_guard() from public;
 revoke all on function public.guard_attendance_finalize() from public;
 revoke all on function public.freeze_closed_attendance() from public;
 revoke all on function public.freeze_closed_evaluation_child() from public;
+revoke all on function public.freeze_closed_competency_entry() from public;
 revoke all on function public.apply_closed_evaluation() from public;
 revoke all on function public.compute_kpi_snapshot(uuid) from public;
 revoke all on function public.close_weekly_evaluation(uuid, text, text) from public;

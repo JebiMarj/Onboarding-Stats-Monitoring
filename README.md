@@ -67,17 +67,17 @@ An admin sets Endorsed from the Status menu when the current status is Ready for
 
 Training completed → Add VA (name, onboarding start, onboarder, client, business, SOP or portfolio, status, schedule, batch) → Save. The name opens that person’s monitoring page.
 
-An admin or onboarder opens a week by saving QA or a competency for that Monday. QA can save a score only after that week exists. A week that has not been started shows “An onboarder needs to start this week before a QA score can be saved.”
+An admin or onboarder opens a week by saving QA or a competency for that Monday. QA can save a score only after that week exists. A week that has not been started shows “An onboarder needs to start this week before a QA score can be saved.” The week is the Monday of the From date. The screen does not show week numbers.
 
 The Attendance page is a completion panel and a daily table. Finalize attendance locks every row for that VA. An admin can undo it. + Add record stays on the page; after finalize it is disabled and the page says attendance is finalized. Each saved day is Present, Late, or Absent, with late minutes, downtime minutes, and a remark. Eight hours is 480 minutes and scores 100%. A full-day absence is 0%. Otherwise the day is `(480 − late minutes − downtime minutes) / 480 × 100`, and it cannot go below 0. That per-minute rate is `ATTENDANCE_MINUTE_DEDUCTION` in `js/score.js`. Weekly attendance on the card is the average of the saved days in the selected week. A day with no row is left out of the average.
 
-Weekly QA is a score from 0 to 100, an evaluation-form link, and a call-recording link. Links must be `http` or `https`, or blank. 80 or above shows a green pill. 79 and below shows a red pill. The pass mark in `js/score.js` is 80. Each row is labeled Week 1, Week 2, and so on from the Monday of the VA’s start date, with the Monday–Sunday dates beside it. + Add QA saves another week.
+Weekly QA is a score from 0 to 100, an evaluation-form link, and a call-recording link. Links must be `http` or `https`, or blank. 80 or above shows a green pill. 79 and below shows a red pill. The pass mark in `js/score.js` is 80. + Add QA asks for a From date and an optional To date. The list shows that range. A row saved before those dates existed shows the Monday–Sunday of its week. One score is kept for the week that contains From. A second Add in that same week says a QA score already exists.
 
 WBR is a table of saved days, newest first, added from + Add WBR. Each row is a date, total leads, and converted leads. A day's rate is `converted / total × 100`, capped at 100, and it is shown as the row is entered. The same VA and date cannot be saved twice. The week rate on the WBR card is the sum of converted leads divided by the sum of total leads for days whose total is greater than zero. A blank or zero total is left out. If no day counts, that section drops out of the stored score.
 
-Competencies are tool navigation, communication, critical thinking, and core values. Each is 0–100 and has its own comment. An onboarder enters them.
+Tool navigation, critical thinking, communication, and core values each have their own list. + Add opens a modal for a date, a score from 0 to 100, and an optional comment. Several entries are allowed, including more than one on the same day. The list is newest first, with Edit and Delete. The card on the overview shows the latest score by date. When two entries share a date, the one saved last is the latest. A closed week blocks dates inside it. Until the new table exists, saving says the database update has to be applied first. The week score still uses the latest entry inside that week.
 
-Coaching is a date, topic, discussion, and action. It is history only. It is not in the score, and a closed week does not freeze it.
+Feedback sessions use the same list and + Add pattern. The fields are date, topic, what was discussed, and action. That history is not in the score, and a closed week does not freeze it. No database change is required for feedback.
 
 ## KPI formula
 
@@ -153,5 +153,7 @@ The profile is a header plus eight cards: Attendance, QA score, WBR, Tool naviga
 `supabase/migrations/20261022_multiple_open_weeks.sql` drops the one-open-week index. The live database already has that drop. The insert policy stays admin and onboarder. QA cannot insert `weekly_evaluations`.
 
 `supabase/migrations/20261022_manual_endorsed.sql` would let an admin or onboarder set Endorsed from any current status. It is not part of `schema.sql`, and the app does not use that broader rule.
+
+`supabase/migrations/20261022_dated_entries.sql` adds `weekly_qa.period_start` and `weekly_qa.period_end`, and a `competency_entries` table for dated competency scores. It is not applied. `schema.sql` includes the same shape so a new database and the local test match. The hosted database does not, until this file is approved and run.
 
 Do not apply these files until they are approved. `supabase/schema.sql` matches a fresh install and is not a migration for the database that is already live.
