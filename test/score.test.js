@@ -116,6 +116,7 @@ test('a missing section is rescaled and a zero is kept', () => {
 });
 
 test('pass mark boundaries are 80 pass and 79.99 fail', () => {
+  assert.equal(Score.DEFAULT_PASS_MARK, 80);
   const pass = Score.scoreEvaluation({
     scores: scores({ qa: 80 }),
     weights: Score.DEFAULT_WEIGHTS,
@@ -197,4 +198,14 @@ test('weeks start on Monday', () => {
   assert.equal(Dates.isMonday('2026-10-12'), true);
   assert.equal(Dates.isMonday('2026-10-13'), false);
   assert.equal(Dates.addDays('2026-10-12', 7), '2026-10-19');
+});
+
+test('training weeks are numbered from the Monday of the start date', () => {
+  assert.equal(Dates.mondayOf('2026-01-01'), '2025-12-29');
+  assert.equal(Dates.trainingWeekNumber('2026-01-05', '2026-01-05'), 1);
+  assert.equal(Dates.weekRangeLabel('2026-01-05', '2026-01-05'), 'Week 1 · Jan 5 – Jan 11');
+  assert.equal(Dates.trainingWeekNumber('2026-01-05', '2026-01-12'), 2);
+  assert.equal(Dates.trainingWeekNumber('2026-01-01', '2025-12-29'), 1);
+  assert.equal(Dates.weekRangeLabel('2026-01-01', '2025-12-29'), 'Week 1 · Dec 29 – Jan 4');
+  assert.equal(Dates.trainingWeekNumber('2026-01-01', '2026-01-05'), 2);
 });

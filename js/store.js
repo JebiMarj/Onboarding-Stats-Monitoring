@@ -449,6 +449,33 @@
       }, { onConflict: 'evaluation_id' });
       if (res.error) raise(res.error);
     },
+    async saveQaForWeek(input) {
+      if (mock) return apply(function (current, actor) { return root.CNRModel.saveQaForWeek(current, actor, input); });
+      var week = root.CNRDates.mondayOf(input.weekStart);
+      if (!week) throw new Error('Weeks start on Monday.');
+      var found = await sb().from('weekly_evaluations').select('id, status').eq('va_id', input.vaId).eq('week_start', week).maybeSingle();
+      if (found.error) raise(found.error);
+      var evaluationId = found.data && found.data.id;
+      if (found.data && found.data.status === 'closed') throw new Error('This week is closed and its scores cannot be changed.');
+      if (!evaluationId) {
+        var created = await sb().from('weekly_evaluations').insert({
+          va_id: input.vaId,
+          week_start: week,
+          status: 'open'
+        }).select('id').single();
+        if (created.error) {
+          if (/duplicate|unique/i.test(created.error.message || '')) throw new Error('That week cannot be added while another week is open.');
+          raise(created.error);
+        }
+        evaluationId = created.data.id;
+      }
+      return api.saveQa({
+        evaluationId: evaluationId,
+        score: input.score,
+        formUrl: input.formUrl,
+        recordingUrl: input.recordingUrl
+      });
+    },
     async deleteQa(evaluationId) {
       if (mock) return apply(function (current, actor) { return root.CNRModel.deleteQa(current, actor, { evaluationId: evaluationId }); });
       var res = await sb().from('weekly_qa').delete().eq('evaluation_id', evaluationId);
@@ -459,22 +486,53 @@
       var totalBlank = input.totalLeads == null || input.totalLeads === '';
       var convertedBlank = input.convertedLeads == null || input.convertedLeads === '';
       if (totalBlank && convertedBlank) {
+        if (input.asNew || input.id) throw new Error('Enter total leads or converted leads.');
         var cleared = await sb().from('wbr_days').delete().eq('va_id', input.vaId).eq('work_date', input.workDate);
         if (cleared.error) raise(cleared.error);
         return;
       }
-      var res = await sb().from('wbr_days').upsert({
+      var payload = {
         va_id: input.vaId,
         work_date: input.workDate,
         total_leads: totalBlank ? null : input.totalLeads,
         converted_leads: convertedBlank ? null : input.convertedLeads
-      }, { onConflict: 'va_id,work_date' });
-      if (res.error) raise(res.error);
+      };
+      var res;
+      if (input.id) res = await sb().from('wbr_days').update(payload).eq('id', input.id);
+      else if (input.asNew) res = await sb().from('wbr_days').insert(payload);
+      else res = await sb().from('wbr_days').upsert(payload, { onConflict: 'va_id,work_date' });
+      if (res.error) {
+        if ((input.asNew || input.id) && /duplicate|unique/i.test(res.error.message || '')) throw new Error('That date already has a WBR record.');
+        raise(res.error);
+      }
     },
     async deleteWbrDay(id) {
       if (mock) return apply(function (current, actor) { return root.CNRModel.deleteWbrDay(current, actor, { id: id }); });
       var res = await sb().from('wbr_days').delete().eq('id', id);
       if (res.error) raise(res.error);
+    },
+    async saveCompetenciesForWeek(input) {
+      if (mock) return apply(function (current, actor) { return root.CNRModel.saveCompetenciesForWeek(current, actor, input); });
+      var week = root.CNRDates.mondayOf(input.weekStart);
+      if (!week) throw new Error('Weeks start on Monday.');
+      var found = await sb().from('weekly_evaluations').select('id, status').eq('va_id', input.vaId).eq('week_start', week).maybeSingle();
+      if (found.error) raise(found.error);
+      var evaluationId = found.data && found.data.id;
+      if (found.data && found.data.status === 'closed') throw new Error('This week is closed and its scores cannot be changed.');
+      if (!evaluationId) {
+        var created = await sb().from('weekly_evaluations').insert({
+          va_id: input.vaId,
+          week_start: week,
+          status: 'open'
+        }).select('id').single();
+        if (created.error) {
+          if (/duplicate|unique/i.test(created.error.message || '')) throw new Error('That week cannot be added while another week is open.');
+          raise(created.error);
+        }
+        evaluationId = created.data.id;
+      }
+      var payload = Object.assign({}, input, { evaluationId: evaluationId });
+      return api.saveCompetencies(payload);
     },
     async saveCompetencies(input) {
       if (mock) return apply(function (current, actor) { return root.CNRModel.saveCompetencies(current, actor, input); });
