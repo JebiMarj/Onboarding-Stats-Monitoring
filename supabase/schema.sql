@@ -156,6 +156,8 @@ create table public.va_profiles (
   batch_id uuid not null references public.batches (id),
   endorsed_by uuid references public.profiles (id) on delete set null,
   endorsed_at timestamptz,
+  attendance_finalized_at timestamptz,
+  attendance_finalized_by uuid references public.profiles (id) on delete set null,
   created_by uuid references public.profiles (id) on delete set null,
   created_at timestamptz not null default now(),
   updated_by uuid references public.profiles (id) on delete set null,
@@ -306,6 +308,40 @@ create trigger batches_stamp before insert or update on public.batches
   for each row execute function public.stamp_writer();
 create trigger va_profiles_stamp before insert or update on public.va_profiles
   for each row execute function public.stamp_writer();
+
+create or replace function public.guard_attendance_finalize()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.attendance_finalized_at is not distinct from old.attendance_finalized_at
+     and new.attendance_finalized_by is not distinct from old.attendance_finalized_by then
+    return new;
+  end if;
+  if old.attendance_finalized_at is null and new.attendance_finalized_at is not null then
+    if public.app_role() not in ('admin', 'onboarder') then
+      raise exception 'You cannot finalize attendance.';
+    end if;
+    new.attendance_finalized_at := now();
+    new.attendance_finalized_by := auth.uid();
+    return new;
+  end if;
+  if old.attendance_finalized_at is not null and new.attendance_finalized_at is null then
+    if public.app_role() is distinct from 'admin' then
+      raise exception 'Only an admin can undo finalized attendance.';
+    end if;
+    new.attendance_finalized_by := null;
+    return new;
+  end if;
+  raise exception 'Attendance finalization can only be set or cleared.';
+end
+$$;
+
+create trigger va_profiles_attendance_finalize
+  before update on public.va_profiles
+  for each row execute function public.guard_attendance_finalize();
 create trigger attendance_days_stamp before insert or update on public.attendance_days
   for each row execute function public.stamp_writer();
 create trigger weekly_evaluations_stamp before insert or update on public.weekly_evaluations
@@ -330,6 +366,9 @@ as $$
 begin
   if new.status in ('Endorsed', 'Ready for endorsement') then
     raise exception 'That status is not available when adding a VA.';
+  end if;
+  if new.attendance_finalized_at is not null or new.attendance_finalized_by is not null then
+    raise exception 'Finalize attendance after the VA exists.';
   end if;
   return new;
 end
@@ -419,6 +458,13 @@ begin
   else
     target_va := new.va_id;
     target_day := new.work_date;
+  end if;
+  if TG_TABLE_NAME = 'attendance_days' and exists (
+    select 1 from public.va_profiles v
+    where v.id = target_va
+      and v.attendance_finalized_at is not null
+  ) then
+    raise exception 'Attendance is finalized.';
   end if;
   if TG_OP = 'UPDATE' and old.work_date is distinct from new.work_date then
     if exists (
@@ -986,6 +1032,7 @@ revoke all on function public.stamp_writer() from public;
 revoke all on function public.va_insert_guard() from public;
 revoke all on function public.va_added_history() from public;
 revoke all on function public.va_status_guard() from public;
+revoke all on function public.guard_attendance_finalize() from public;
 revoke all on function public.freeze_closed_attendance() from public;
 revoke all on function public.freeze_closed_evaluation_child() from public;
 revoke all on function public.apply_closed_evaluation() from public;
@@ -1003,8 +1050,12 @@ comment on table public.profiles is
   'Role per auth user. admin: everything. onboarder: profiles, attendance, WBR, competencies, coaching, evaluations, all VAs. qa: QA score and links. viewer: read only.';
 comment on table public.app_settings is
   'key kpi: {passMark, weights}. Weights must sum to 100. Empty KPI sections are rescaled in compute_kpi_snapshot.';
+comment on column public.va_profiles.attendance_finalized_at is
+  'When set, attendance rows for this VA cannot be inserted, updated, or deleted. Only an admin can clear it.';
+comment on column public.va_profiles.attendance_finalized_by is
+  'Profile that finalized attendance. Stamped by guard_attendance_finalize.';
 comment on column public.attendance_days.absent is
-  'Full-day absence. Daily percent is 0. Otherwise (480 - late_minutes - downtime_minutes) / 480, floored at 0.';
+  'Full-day absence. Daily percent is 0. Otherwise (480 - late_minutes - downtime_minutes) / 480, floored at 0. The per-minute rate lives in js/score.js as ATTENDANCE_MINUTE_DEDUCTION.';
 comment on column public.attendance_days.remarks is
   'Reason for a late arrival, downtime, or a full-day absence.';
 comment on table public.wbr_days is

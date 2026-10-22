@@ -69,7 +69,7 @@ Training completed → Add VA (name, onboarding start, onboarder, client, busine
 
 Start a weekly evaluation on a Monday. The next week is created with Next weekly evaluation after the current week is closed. One week per VA can be open.
 
-Each work day has one attendance row: absent or not, late minutes, downtime minutes, and a remark for the reason. Eight hours is 480 minutes and scores 100%. A full-day absence is 0%. Otherwise the day is `(480 − late minutes − downtime minutes) / 480 × 100`, and it cannot go below 0. Weekly attendance is the average of the days that were saved. A day with no row is left out of the average.
+The Attendance card opens a completion panel and a daily table. Finalize attendance locks every row for that VA. An admin can undo it. Each saved day is Present, Late, or Absent, with late minutes, downtime minutes, and a remark. Eight hours is 480 minutes and scores 100%. A full-day absence is 0%. Otherwise the day is `(480 − late minutes − downtime minutes) / 480 × 100`, and it cannot go below 0. That per-minute rate is `ATTENDANCE_MINUTE_DEDUCTION` in `js/score.js`. Weekly attendance on the card is the average of the saved days in the selected week. A day with no row is left out of the average.
 
 Weekly QA is a score from 0 to 100, an evaluation-form link, and a call-recording link. Links must be `http` or `https`, or blank. 80 or above is a pass and shows green. Below 80 is a fail and shows red.
 
@@ -146,4 +146,8 @@ The profile is a header plus eight cards: Attendance, QA score, WBR, Tool naviga
 
 ## Schema change waiting for approval
 
-`supabase/migrations/20261022_daily_wbr_and_remarks.sql` adds `attendance_days.remarks` and a daily `wbr_days` table, then replaces `compute_kpi_snapshot`. It does not drop `weekly_wbr`. Do not apply it until it is approved. `supabase/schema.sql` matches a fresh install and is not a migration for the database that is already live.
+`supabase/migrations/20261022_daily_wbr_and_remarks.sql` adds `attendance_days.remarks` and a daily `wbr_days` table, then replaces `compute_kpi_snapshot`. It does not drop `weekly_wbr`.
+
+`supabase/migrations/20261022_finalize_attendance.sql` adds `va_profiles.attendance_finalized_at` and `attendance_finalized_by`. While those are set, attendance rows for that VA cannot be inserted, updated, or deleted. An onboarder or admin can set the lock. Only an admin can clear it. A closed week still blocks its own days after the lock is cleared.
+
+Do not apply either file until it is approved. `supabase/schema.sql` matches a fresh install and is not a migration for the database that is already live.

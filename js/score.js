@@ -7,6 +7,12 @@
   else root.CNRScore = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   var WORK_MINUTES = 480;
+  // Percent taken off for each late or downtime minute.
+  // 100 / 480 is an 8-hour day: (480 − late − downtime) ÷ 480 × 100.
+  // Set this to 1 for 100 − late × 1 − downtime × 1, and update
+  // compute_kpi_snapshot in supabase/schema.sql to the same rule.
+  var ATTENDANCE_MINUTE_DEDUCTION = 100 / WORK_MINUTES;
+  var ATTENDANCE_FLOOR_NOTE = 'Minimum score is 0%.';
   var SECTION_KEYS = [
     'attendance',
     'conversion',
@@ -41,15 +47,68 @@
     return value == null || value === '';
   }
 
+  function isAbsent(src) {
+    return src.absent === true || src.absent === 1 || src.absent === 'true' || src.absent === 'on';
+  }
+
+  function minutesOf(value) {
+    var n = Number(value || 0);
+    if (!Number.isFinite(n) || n < 0) return 0;
+    return n;
+  }
+
+  function formatMinutes(value) {
+    if (Math.abs(value - Math.round(value)) < 1e-9) return String(Math.round(value));
+    return String(value);
+  }
+
+  function usesEightHourRule() {
+    return Math.abs(ATTENDANCE_MINUTE_DEDUCTION - (100 / WORK_MINUTES)) < 1e-12;
+  }
+
   function dailyAttendancePercent(input) {
     var src = input || {};
-    if (src.absent === true || src.absent === 1 || src.absent === 'true') return 0;
-    var late = Number(src.lateMinutes || 0);
-    var down = Number(src.downtimeMinutes || 0);
-    if (!Number.isFinite(late)) late = 0;
-    if (!Number.isFinite(down)) down = 0;
-    var pct = (WORK_MINUTES - late - down) / WORK_MINUTES * 100;
+    if (isAbsent(src)) return 0;
+    var late = minutesOf(src.lateMinutes);
+    var down = minutesOf(src.downtimeMinutes);
+    var pct = 100 - (late + down) * ATTENDANCE_MINUTE_DEDUCTION;
     return pct < 0 ? 0 : pct;
+  }
+
+  function attendanceStatus(input) {
+    var src = input || {};
+    if (isAbsent(src)) return 'Absent';
+    if (minutesOf(src.lateMinutes) > 0) return 'Late';
+    return 'Present';
+  }
+
+  function attendanceRuleText() {
+    if (ATTENDANCE_MINUTE_DEDUCTION === 1) return '100 − late × 1 − downtime × 1';
+    if (usesEightHourRule()) return '(480 − late − downtime) ÷ 480 × 100';
+    return '100 − late × ' + ATTENDANCE_MINUTE_DEDUCTION + ' − downtime × ' + ATTENDANCE_MINUTE_DEDUCTION;
+  }
+
+  function describeDailyAttendance(input) {
+    var src = input || {};
+    var absent = isAbsent(src);
+    var late = absent ? 0 : minutesOf(src.lateMinutes);
+    var down = absent ? 0 : minutesOf(src.downtimeMinutes);
+    var percent = dailyAttendancePercent({ absent: absent, lateMinutes: late, downtimeMinutes: down });
+    var formula;
+    if (absent) formula = 'Absent = 0%';
+    else if (ATTENDANCE_MINUTE_DEDUCTION === 1) {
+      formula = '100 − ' + formatMinutes(late) + ' × 1 − ' + formatMinutes(down) + ' × 1';
+    } else if (usesEightHourRule()) {
+      formula = '(480 − ' + formatMinutes(late) + ' − ' + formatMinutes(down) + ') ÷ 480 × 100';
+    } else {
+      formula = '100 − ' + formatMinutes(late) + ' × ' + ATTENDANCE_MINUTE_DEDUCTION + ' − ' + formatMinutes(down) + ' × ' + ATTENDANCE_MINUTE_DEDUCTION;
+    }
+    return {
+      percent: percent,
+      formula: formula,
+      rule: attendanceRuleText(),
+      absent: absent
+    };
   }
 
   function weeklyAttendance(dailyPercents) {
@@ -179,12 +238,17 @@
 
   return {
     WORK_MINUTES: WORK_MINUTES,
+    ATTENDANCE_MINUTE_DEDUCTION: ATTENDANCE_MINUTE_DEDUCTION,
+    ATTENDANCE_FLOOR_NOTE: ATTENDANCE_FLOOR_NOTE,
     SECTION_KEYS: SECTION_KEYS,
     SECTION_LABELS: SECTION_LABELS,
     DEFAULT_WEIGHTS: DEFAULT_WEIGHTS,
     DEFAULT_PASS_MARK: DEFAULT_PASS_MARK,
     SUM_TOLERANCE: SUM_TOLERANCE,
     dailyAttendancePercent: dailyAttendancePercent,
+    attendanceStatus: attendanceStatus,
+    attendanceRuleText: attendanceRuleText,
+    describeDailyAttendance: describeDailyAttendance,
     weeklyAttendance: weeklyAttendance,
     conversionRate: conversionRate,
     weightsSum: weightsSum,

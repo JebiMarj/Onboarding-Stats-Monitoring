@@ -341,6 +341,57 @@ test('Postgres formula matches the JavaScript formula and RLS enforces roles', {
   assert.equal(endorseNote.rows[0].note, 'Endorsed');
   assert.equal(endorseNote.rows[0].changed_by, admin);
 
+  await asUser(db, onboarder, () => db.query(
+    `insert into public.attendance_days (va_id, work_date, absent, late_minutes, downtime_minutes, remarks)
+     values ($1, '2026-11-02', false, 0, 0, 'On time')`,
+    [va.id]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `update public.va_profiles set attendance_finalized_at = now() where id = $1`,
+    [va.id]
+  ));
+  const stamped = await db.query(
+    `select attendance_finalized_by from public.va_profiles where id = $1`,
+    [va.id]
+  );
+  assert.equal(stamped.rows[0].attendance_finalized_by, onboarder);
+  await expectThrow(
+    asUser(db, onboarder, () => db.query(
+      `update public.attendance_days set late_minutes = 5 where va_id = $1 and work_date = '2026-11-02'`,
+      [va.id]
+    )),
+    /Attendance is finalized/
+  );
+  await asUser(db, onboarder, () => db.query(
+    `insert into public.wbr_days (va_id, work_date, total_leads, converted_leads)
+     values ($1, '2026-11-02', 8, 3)`,
+    [va.id]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `update public.wbr_days set converted_leads = 4 where va_id = $1 and work_date = '2026-11-02'`,
+    [va.id]
+  ));
+  const wbrWhileFinalized = await db.query(
+    `select converted_leads from public.wbr_days where va_id = $1 and work_date = '2026-11-02'`,
+    [va.id]
+  );
+  assert.equal(Number(wbrWhileFinalized.rows[0].converted_leads), 4);
+  await expectThrow(
+    asUser(db, onboarder, () => db.query(
+      `update public.va_profiles set attendance_finalized_at = null where id = $1`,
+      [va.id]
+    )),
+    /Only an admin can undo finalized attendance/
+  );
+  await asUser(db, admin, () => db.query(
+    `update public.va_profiles set attendance_finalized_at = null, attendance_finalized_by = null where id = $1`,
+    [va.id]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `update public.attendance_days set late_minutes = 5 where va_id = $1 and work_date = '2026-11-02'`,
+    [va.id]
+  ));
+
   await expectThrow(
     db.query(`update public.app_settings set value = '{"passMark":80,"weights":{"attendance":90}}'::jsonb where key = 'kpi'`),
     /Weights must sum to 100/

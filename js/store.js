@@ -195,6 +195,9 @@
       endorsedBy: row.endorsed_by || '',
       endorsedAt: row.endorsed_at || '',
       endorsedByName: names[row.endorsed_by] || '',
+      attendanceFinalizedAt: row.attendance_finalized_at || '',
+      attendanceFinalizedBy: row.attendance_finalized_by || '',
+      attendanceFinalizedByName: names[row.attendance_finalized_by] || '',
       attendance: (row.attendance_days || []).map(function (day) {
         return {
           id: day.id,
@@ -389,19 +392,37 @@
     },
     async saveAttendance(input) {
       if (mock) return apply(function (current, actor) { return root.CNRModel.saveAttendance(current, actor, input); });
-      var res = await sb().from('attendance_days').upsert({
+      var payload = {
         va_id: input.vaId,
         work_date: input.workDate,
         absent: !!input.absent,
         late_minutes: input.absent ? 0 : Number(input.lateMinutes || 0),
         downtime_minutes: input.absent ? 0 : Number(input.downtimeMinutes || 0),
         remarks: input.remarks ? String(input.remarks).trim() : null
-      }, { onConflict: 'va_id,work_date' });
+      };
+      var res = input.id
+        ? await sb().from('attendance_days').update(payload).eq('id', input.id)
+        : await sb().from('attendance_days').upsert(payload, { onConflict: 'va_id,work_date' });
       if (res.error) raise(res.error);
     },
     async deleteAttendance(id) {
       if (mock) return apply(function (current, actor) { return root.CNRModel.deleteAttendance(current, actor, { id: id }); });
       var res = await sb().from('attendance_days').delete().eq('id', id);
+      if (res.error) raise(res.error);
+    },
+    async finalizeAttendance(vaId) {
+      if (mock) return apply(function (current, actor) { return root.CNRModel.finalizeAttendance(current, actor, { vaId: vaId }); });
+      var res = await sb().from('va_profiles').update({
+        attendance_finalized_at: new Date().toISOString()
+      }).eq('id', vaId);
+      if (res.error) raise(res.error);
+    },
+    async undoFinalizeAttendance(vaId) {
+      if (mock) return apply(function (current, actor) { return root.CNRModel.undoFinalizeAttendance(current, actor, { vaId: vaId }); });
+      var res = await sb().from('va_profiles').update({
+        attendance_finalized_at: null,
+        attendance_finalized_by: null
+      }).eq('id', vaId);
       if (res.error) raise(res.error);
     },
     async startEvaluation(vaId, weekStart) {
