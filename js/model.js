@@ -8,7 +8,7 @@
   }
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (Score, Dates, Perms, Labels) {
   var MANUAL_ONBOARDER = ['Onboarding', 'Resigned', 'EOC'];
-  var MANUAL_ADMIN = ['Onboarding', 'Continue onboarding', 'Ready for endorsement', 'Resigned', 'EOC'];
+  var MANUAL_ADMIN = ['Onboarding', 'Continue onboarding', 'Ready for endorsement', 'Endorsed', 'Resigned', 'EOC'];
   var ACTIVE = ['Onboarding', 'Continue onboarding', 'Ready for endorsement'];
 
   function clone(value) {
@@ -371,16 +371,24 @@
     var denied = gate(actor, 'manage_va');
     if (denied) return fail(denied);
     var status = input && input.status;
-    if (status === 'Endorsed') return fail('Use Endorse to mark a VA as endorsed.');
     var allowed = actor.role === 'admin' ? MANUAL_ADMIN : MANUAL_ONBOARDER;
-    if (allowed.indexOf(status) === -1) return fail('That status is set by closing a weekly evaluation.');
+    if (allowed.indexOf(status) === -1) {
+      if (status === 'Endorsed') return fail('Your role cannot do that.');
+      return fail('That status is set by closing a weekly evaluation.');
+    }
     var next = clone(state);
     var va = findVa(next, input.id);
     if (!va) return fail('VA not found.');
+    if (status === 'Endorsed' && va.status !== 'Ready for endorsement' && va.status !== 'Endorsed') {
+      return fail('Only a VA who is ready for endorsement can be endorsed.');
+    }
     if (va.status === status) return { ok: true, state: next, va: va };
     var previous = va.status;
     va.status = status;
-    if (status !== 'Endorsed') {
+    if (status === 'Endorsed') {
+      va.endorsedBy = actor.id;
+      va.endorsedAt = new Date().toISOString();
+    } else {
       va.endorsedBy = '';
       va.endorsedAt = '';
     }
@@ -533,6 +541,9 @@
     if (existing) {
       if (existing.status === 'closed') return fail('This week is closed and its scores cannot be changed.');
       return { ok: true, state: state, evaluation: existing };
+    }
+    if (!Perms.can(actor.role, 'evaluations') && !Perms.can(actor.role, 'competencies')) {
+      return fail('An onboarder needs to start this week before a QA score can be saved.');
     }
     var next = clone(state);
     var ev = {

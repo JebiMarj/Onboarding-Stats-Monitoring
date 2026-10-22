@@ -59,21 +59,21 @@ Anyone who can sign in can read. The database enforces writes. The screen hides 
 | QA | QA score, evaluation-form link, and call-recording link |
 | Viewer | Nothing. This is the default for a new account |
 
-Onboarders can update every VA, not only the ones they onboard. That keeps a one-person team from having to reassign records. QA cannot close a week, and an onboarder cannot edit a QA score.
+Onboarders can update every VA, not only the ones they onboard. That keeps a one-person team from having to reassign records. An onboarder cannot edit a QA score. QA cannot insert a weekly evaluation.
 
-Endorse is a separate admin action. It is allowed only when the status is Ready for endorsement, and it records who did it and when.
+An admin sets Endorsed from the Status menu when the current status is Ready for endorsement. That records who did it and when. Resigned and EOC are in the same menu for an admin or an onboarder, and those choices ask for confirmation.
 
 ## Weekly flow
 
 Training completed → Add VA (name, onboarding start, onboarder, client, business, SOP or portfolio, status, schedule, batch) → Save. The name opens that person’s monitoring page.
 
-Start a weekly evaluation on a Monday from the card overview. The next week is created with Next weekly evaluation after the latest week is closed. That Start button still allows only one open week. Saving a QA score or a competency for another Monday opens that week as well.
+An admin or onboarder opens a week by saving QA or a competency for that Monday. QA can save a score only after that week exists. A week that has not been started shows “An onboarder needs to start this week before a QA score can be saved.”
 
 The Attendance page is a completion panel and a daily table. Finalize attendance locks every row for that VA. An admin can undo it. + Add record stays on the page; after finalize it is disabled and the page says attendance is finalized. Each saved day is Present, Late, or Absent, with late minutes, downtime minutes, and a remark. Eight hours is 480 minutes and scores 100%. A full-day absence is 0%. Otherwise the day is `(480 − late minutes − downtime minutes) / 480 × 100`, and it cannot go below 0. That per-minute rate is `ATTENDANCE_MINUTE_DEDUCTION` in `js/score.js`. Weekly attendance on the card is the average of the saved days in the selected week. A day with no row is left out of the average.
 
 Weekly QA is a score from 0 to 100, an evaluation-form link, and a call-recording link. Links must be `http` or `https`, or blank. 80 or above shows a green pill. 79 and below shows a red pill. The pass mark in `js/score.js` is 80. Each row is labeled Week 1, Week 2, and so on from the Monday of the VA’s start date, with the Monday–Sunday dates beside it. + Add QA saves another week.
 
-WBR is a table of saved days, newest first, added from + Add WBR. Each row is a date, total leads, and converted leads. A day's rate is `converted / total × 100`, capped at 100, and it is shown as the row is entered. The same VA and date cannot be saved twice. The week rate, which is the KPI section on the card overview, is the sum of converted leads divided by the sum of total leads for days whose total is greater than zero. A blank or zero total is left out. If no day counts, that section drops out of the score.
+WBR is a table of saved days, newest first, added from + Add WBR. Each row is a date, total leads, and converted leads. A day's rate is `converted / total × 100`, capped at 100, and it is shown as the row is entered. The same VA and date cannot be saved twice. The week rate on the WBR card is the sum of converted leads divided by the sum of total leads for days whose total is greater than zero. A blank or zero total is left out. If no day counts, that section drops out of the stored score.
 
 Competencies are tool navigation, communication, critical thinking, and core values. Each is 0–100 and has its own comment. An onboarder enters them.
 
@@ -95,13 +95,13 @@ Default weights, editable in Settings, must sum to 100:
 
 A blank section is left out. The remaining weights are scaled so they sum to 100%. A stored zero stays in the formula. Example: only attendance is entered, at 90%. Its effective weight becomes 100%, and the overall score is 90.
 
-Overall = sum of (section score × effective weight / 100). The monitoring page shows that sentence and the breakdown. Closing a week asks Postgres to compute the same snapshot again, so the saved score is not whatever the browser last displayed. Later edits to Settings do not rewrite a closed week.
+Overall = sum of (section score × effective weight / 100). Closing a week asks Postgres to compute the same snapshot again, so the saved score is not whatever the browser last displayed. Later edits to Settings do not rewrite a closed week. The card overview does not show that breakdown.
 
 The pass mark defaults to 80 and can be changed in Settings. A score of 80 meets it. A score of 79.99 does not.
 
-- At or above the pass mark, closing sets the status to Ready for endorsement. Endorse is the next click, and only an admin can do it.
+- At or above the pass mark, closing a week in the database sets the status to Ready for endorsement.
 - Below the pass mark, gaps and coaching actions are required. Closing then sets Continue onboarding.
-- Resigned, EOC, and Endorsed are left as they are when a week closes. An admin can correct Onboarding, Continue onboarding, Ready for endorsement, Resigned, and EOC from the monitoring page. Endorsed cannot be typed in. It only comes from Endorse, and only from Ready for endorsement.
+- Resigned, EOC, and Endorsed are left as they are when a week closes. From the Status menu, an admin can set Onboarding, Continue onboarding, Ready for endorsement, Endorsed, Resigned, and EOC. Endorsed is accepted only when the current status is Ready for endorsement. An onboarder can set Onboarding, Resigned, and EOC.
 
 ## Batches
 
@@ -142,7 +142,7 @@ The top bar holds Onboarding (Board, Batches). Search, the theme control, and th
 
 The board counts are On the Roster, Number of Batches, Onboarding, Endorsed to Operations, and Resigned/Terminated. Onboarding includes Continue onboarding and Ready for endorsement. Resigned/Terminated includes Resigned and EOC. Each count filters the list under it. Number of Batches opens the Batches page. The list opens on Onboarding. The + button adds one VA or imports a CSV. The template is a header row only. The import shows a preview and does not save until every row is valid. A card opens the profile. Search is the control on the right of the bar, and the `/` key.
 
-The profile is a header plus eight cards: Attendance, QA score, WBR, Tool navigation, Critical thinking, Communication, Core values, and Feedback sessions. A card opens its own page for that section, with ← Back to the cards and ← Board. Weekly KPI, Close week, and Endorse stay on the card overview. Status and movement history sit in the Status menu.
+The profile is a header plus eight cards: Attendance, QA score, WBR, Tool navigation, Critical thinking, Communication, Core values, and Feedback sessions. A card opens its own page for that section, with ← Back to the cards and ← Board. Status and movement history sit in the Status menu.
 
 ## Schema change waiting for approval
 
@@ -150,6 +150,8 @@ The profile is a header plus eight cards: Attendance, QA score, WBR, Tool naviga
 
 `supabase/migrations/20261022_finalize_attendance.sql` adds `va_profiles.attendance_finalized_at` and `attendance_finalized_by`. While those are set, attendance rows for that VA cannot be inserted, updated, or deleted. An onboarder or admin can set the lock. Only an admin can clear it. A closed week still blocks its own days after the lock is cleared. WBR rows can still be written while attendance is finalized.
 
-`supabase/migrations/20261022_multiple_open_weeks.sql` drops the one-open-week index and lets an admin, onboarder, or QA insert an open weekly evaluation. That is what lets QA and competency pages save a week other than the one started from the profile. The Start button in the app still refuses a second open week.
+`supabase/migrations/20261022_multiple_open_weeks.sql` drops the one-open-week index. The live database already has that drop. The insert policy stays admin and onboarder. QA cannot insert `weekly_evaluations`.
+
+`supabase/migrations/20261022_manual_endorsed.sql` would let an admin or onboarder set Endorsed from any current status. It is not part of `schema.sql`, and the app does not use that broader rule.
 
 Do not apply these files until they are approved. `supabase/schema.sql` matches a fresh install and is not a migration for the database that is already live.

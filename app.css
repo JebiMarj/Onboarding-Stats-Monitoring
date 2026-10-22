@@ -486,11 +486,7 @@ a.btn:hover { background: var(--hv); }
 }
 .weekpick select { width: 100%; }
 .sheethead h1 { margin-top: 0; }
-.formula { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; padding: 0; list-style: none; }
-.formula li { background: var(--hv); border-radius: 999px; padding: 4px 10px; font-size: 13px; }
-.scoreline { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; margin: 12px 0 0; }
 .note { background: var(--hv); border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
-.split { display: grid; grid-template-columns: 1.4fr 0.8fr; gap: 16px; align-items: start; }
 .idtag { font-variant-numeric: tabular-nums; color: var(--mu); font-size: 12px; font-weight: 500; }
 
 @media (max-width: 860px) {
@@ -525,7 +521,6 @@ a.btn:hover { background: var(--hv); }
   #login { grid-template-columns: 1fr; }
   #login .l { display: none; }
   #page { padding: 20px 16px 40px; }
-  .split { grid-template-columns: 1fr; }
   .board { grid-template-columns: minmax(220px, 1fr); }
   .sheetnav { flex-wrap: wrap; }
   .weekpick { width: 100%; }
@@ -542,7 +537,6 @@ a.btn:hover { background: var(--hv); }
    score breakdown scrolls instead of clipping. */
 a.pc { display: block; color: inherit; text-decoration: none; cursor: pointer; }
 a.pc:active { cursor: pointer; }
-.formula { flex-direction: column; align-items: flex-start; }
 .days { display: flex; flex-direction: column; gap: 8px; }
 .day {
   display: grid;
@@ -556,10 +550,6 @@ a.pc:active { cursor: pointer; }
 .day.wbr { grid-template-columns: minmax(110px, 150px) minmax(110px, 1fr) minmax(110px, 1fr) 72px auto; }
 .day b { font-weight: 600; }
 .day small { color: var(--mu); }
-.scorewrap { overflow-x: auto; }
-.scorewrap table { min-width: 520px; }
-.scorewrap th, .scorewrap td { white-space: nowrap; }
-.scorewrap td:first-child, .scorewrap th:first-child { white-space: normal; }
 .pagerow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 #flash:empty { display: none; }
 #page-error:empty { display: none; }

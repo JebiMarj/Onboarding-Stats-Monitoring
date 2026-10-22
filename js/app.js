@@ -109,12 +109,6 @@
     return '<span class="' + cls + '">' + esc(status || '—') + '</span>';
   }
 
-  function outcomeLabel(outcome) {
-    if (outcome === 'ready_for_endorsement') return 'Ready for endorsement';
-    if (outcome === 'continue_onboarding') return 'Continue onboarding';
-    return outcome || '—';
-  }
-
   function banner() {
     return '<p id="flash" class="note">' + esc(state.flash) + '</p><p id="page-error" class="rename-err">' + esc(state.error) + '</p>';
   }
@@ -608,17 +602,15 @@
     return '<label class="weekpick">Week<select id="week-select">' + options + '</select></label>';
   }
 
-  function startForm(monday) {
-    if (!can('evaluations')) return '<div class="card"><p>An onboarder starts the weekly evaluation.</p></div>';
-    return '<form id="start-week" class="card"><h2>Start weekly evaluation</h2><p class="mu">Weeks run Monday through Sunday. A date mid-week snaps back to that Monday.</p><label class="field">Week of<input id="week-start" type="date" required value="' + esc(monday) + '"></label><div class="actions"><button type="submit">Start weekly evaluation</button></div></form>';
-  }
-
   function statusForm(va) {
     var allowed = me().role === 'admin' ? CNRModel.MANUAL_ADMIN : CNRModel.MANUAL_ONBOARDER;
     var options = allowed.map(function (status) {
       return '<option' + (status === va.status ? ' selected' : '') + '>' + esc(status) + '</option>';
     }).join('');
-    return '<form id="status-form"><label class="field">Status<select id="manual-status">' + options + '</select></label><button type="submit" class="g">Update status</button><p class="mu sm">Ready for endorsement and Continue onboarding come from closing a week. Endorsed comes only from Endorse.</p></form>';
+    var note = me().role === 'admin'
+      ? 'Endorsed is allowed when the status is Ready for endorsement. Resigned and EOC ask you to confirm.'
+      : 'Resigned and EOC ask you to confirm.';
+    return '<form id="status-form"><label class="field">Status<select id="manual-status">' + options + '</select></label><button type="submit" class="g">Update status</button><p class="mu sm">' + esc(note) + '</p></form>';
   }
 
   function sectionChrome(va, route) {
@@ -660,7 +652,7 @@
       return summaryCard(key, item[1], value, sub, tone, false);
     }).join('');
     if (focus) return sectionChrome(va, route) + detailFor(va, ev, span, focus);
-    return profileHead(va, ev) + '<div class="scards">' + cards + '</div>' + await kpiSection(va, ev);
+    return profileHead(va, ev) + '<div class="scards">' + cards + '</div>';
   }
 
   function detailFor(va, ev, span, focus) {
@@ -838,58 +830,6 @@
       return '<article class="card"><div class="bar"><b>' + esc(CNRDates.formatLong(item.sessionDate)) + '</b><span>' + esc(item.topic) + '</span><span class="sp"></span>' + remove + '</div><p>' + esc(item.discussion) + '</p><p><b>Action. </b>' + esc(item.action) + '</p></article>';
     }).join('');
     return form + rows;
-  }
-
-  function formulaHtml(score) {
-    var items = (score.breakdown || []).map(function (row) {
-      var weight = row.included ? row.effectiveWeight : row.configuredWeight;
-      var text = row.label + ' × ' + CNRScore.formatWeight(weight) + '%';
-      if (!row.included) text += ' · not entered';
-      return '<li>' + esc(text) + '</li>';
-    });
-    if (score.rescaled) items.push('<li>Remaining weights scaled to 100%</li>');
-    items.push('<li>Pass mark: ' + esc(CNRScore.formatWeight(score.passMark)) + '</li>');
-    return '<ul class="formula">' + items.join('') + '</ul>';
-  }
-
-  function scoreTable(score) {
-    var rows = (score.breakdown || []).map(function (row) {
-      return '<tr><th scope="row">' + esc(row.label) + '</th><td>' + esc(points(row.score)) + '</td><td>' + esc(CNRScore.formatWeight(row.configuredWeight)) + '</td><td>' + esc(CNRScore.formatWeight(row.effectiveWeight)) + '</td><td>' + esc(row.included ? points(row.contribution) : '—') + '</td></tr>';
-    }).join('');
-    return '<div class="scorewrap"><table><thead><tr><th>Section</th><th>Score</th><th>Weight</th><th>Eff. %</th><th>Pts</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
-  }
-
-  async function kpiSection(va, ev) {
-    if (!ev) return '<div id="kpi-section">' + startForm(CNRDates.mondayOf(va.onboardingStart) || CNRDates.mondayOf(CNRDates.todayISO())) + '</div>';
-    var score = ev.score && ev.score.breakdown ? ev.score : CNRScore.scoreEvaluation(await blankScore());
-    var line = score.overall == null ? 'No score yet' : points(score.overall);
-    var verdict = score.passed == null ? '' : (score.passed ? '<span class="b ok">Meets the pass mark</span>' : '<span class="b bad">Below the pass mark</span>');
-    var close = '';
-    if (ev.status === 'open' && can('evaluations')) {
-      if (score.overall == null) {
-        close = '<div class="card"><h2>Close week</h2><p>Enter at least one scored section before closing this week.</p></div>';
-      } else if (score.passed) {
-        close = '<form id="close-form" class="card" data-evaluation="' + esc(ev.id) + '"><h2>Close week</h2><p>This score meets the pass mark. Closing sets Ready for endorsement when the current status allows it. Endorse is a separate step.</p><div class="actions"><button type="submit" id="close-week">Close week</button></div></form>';
-      } else {
-        close = '<form id="close-form" class="card" data-evaluation="' + esc(ev.id) + '"><h2>Close week</h2><p>Gaps and coaching actions are required before this week can close. Closing then sets Continue onboarding when the current status allows it.</p><label class="field">Gaps<textarea id="gaps" required>' + esc(ev.gaps || '') + '</textarea></label><label class="field">Coaching actions<textarea id="actions" required>' + esc(ev.coachingActions || '') + '</textarea></label><div class="actions"><button type="submit" id="close-week">Close week</button></div></form>';
-      }
-    } else if (ev.status === 'closed') {
-      close = '<div class="card"><h2>Closed week</h2><p>' + esc(outcomeLabel(ev.outcome)) + (ev.closedByName ? ' · ' + esc(ev.closedByName) : '') + '</p>' + (ev.gaps ? '<p><b>Gaps. </b>' + esc(ev.gaps) + '</p>' : '') + (ev.coachingActions ? '<p><b>Coaching actions. </b>' + esc(ev.coachingActions) + '</p>' : '') + '</div>';
-    }
-    var latest = va.evaluations[va.evaluations.length - 1];
-    var next = latest && latest.status === 'closed' && can('evaluations') ? '<button type="button" data-action="next-week">Next weekly evaluation</button>' : '';
-    var endorse = '';
-    if (va.status === 'Ready for endorsement' && can('endorse')) endorse = '<button type="button" id="endorse" data-action="endorse">Endorse</button>';
-    else if (va.status === 'Ready for endorsement') endorse = '<p class="mu">An admin endorses this VA.</p>';
-    else if (va.status === 'Endorsed') endorse = '<p>Endorsed' + (va.endorsedByName ? ' by ' + esc(va.endorsedByName) : '') + (va.endorsedAt ? ' on ' + esc(String(va.endorsedAt).slice(0, 10)) : '') + '.</p>';
-    else endorse = '<p class="mu">Endorse appears after a passing week is closed.</p>';
-    var note = score.rescaled ? '<p class="note">Blank sections were left out and the remaining weights were scaled to 100%.</p>' : '';
-    return '<div id="kpi-section" class="split"><section class="card" id="kpi-card"><h2>Weekly KPI</h2>' + formulaHtml(score) + '<p class="scoreline" id="overall">' + esc(line) + ' ' + verdict + '</p>' + note + scoreTable(score) + '</section><div><div class="card"><h2>Endorse</h2>' + endorse + '<div class="actions">' + next + '</div></div>' + close + '</div></div>';
-  }
-
-  async function blankScore() {
-    var settings = await CNRStore.getSettings();
-    return { scores: {}, weights: settings.weights, passMark: settings.passMark };
   }
 
   function historyTab(va) {
@@ -1179,14 +1119,6 @@
         await CNRStore.deleteCoaching(action.dataset.id);
         return navigate(profileHash(route.vaId, 'feedback', ''), 'Session removed.');
       }
-      if (name === 'endorse') {
-        await CNRStore.endorse(route.vaId);
-        return navigate(profileHash(route.vaId, route.focus, route.week), 'Endorsed.');
-      }
-      if (name === 'next-week') {
-        var created = await CNRStore.nextEvaluation(route.vaId);
-        return navigate(profileHash(route.vaId, route.focus, created.weekStart), 'Next week is open.');
-      }
       if (name === 'clear-mock') {
         if (!window.confirm('Clear the preview data in this browser?')) return;
         CNRStore.resetMock();
@@ -1210,12 +1142,6 @@
   async function submitPage(form) {
     var route = readRoute();
     try {
-      if (form.id === 'start-week') {
-        var monday = CNRDates.mondayOf(form.querySelector('#week-start').value);
-        if (!monday) throw new Error('Enter a week.');
-        await CNRStore.startEvaluation(route.vaId, monday);
-        return navigate(profileHash(route.vaId, route.focus, monday), 'Week started.');
-      }
       if (form.dataset.form === 'wbr') {
         await CNRStore.saveWbrDay({
           vaId: route.vaId,
@@ -1261,14 +1187,13 @@
         });
         return navigate(profileHash(route.vaId, 'feedback', ''), 'Session saved.');
       }
-      if (form.id === 'close-form') {
-        var gaps = document.getElementById('gaps');
-        var actions = document.getElementById('actions');
-        await CNRStore.closeEvaluation(form.dataset.evaluation, gaps ? gaps.value : '', actions ? actions.value : '');
-        return navigate(profileHash(route.vaId, route.focus, route.week), 'Week closed.');
-      }
       if (form.id === 'status-form') {
-        await CNRStore.setManualStatus(route.vaId, document.getElementById('manual-status').value);
+        var nextStatus = document.getElementById('manual-status').value;
+        var currentStatus = cache.current && cache.current.status;
+        if (nextStatus !== currentStatus && (nextStatus === 'Endorsed' || nextStatus === 'Resigned' || nextStatus === 'EOC')) {
+          if (!window.confirm('Set this VA to ' + nextStatus + '?')) return;
+        }
+        await CNRStore.setManualStatus(route.vaId, nextStatus);
         return navigate(profileHash(route.vaId, route.focus, route.week), 'Status updated.');
       }
       if (form.id === 'batch-form') {
