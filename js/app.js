@@ -525,8 +525,11 @@
       var found = list.filter(function (ev) { return ev.weekStart === week; })[0];
       if (found) return found;
     }
-    var open = list.filter(function (ev) { return ev.status === 'open'; })[0];
-    if (open) return open;
+    var today = CNRDates.mondayOf(CNRDates.todayISO());
+    var current = list.filter(function (ev) { return ev.weekStart === today; })[0];
+    if (current) return current;
+    var open = list.filter(function (ev) { return ev.status === 'open'; });
+    if (open.length) return open[open.length - 1];
     return list.length ? list[list.length - 1] : null;
   }
 
