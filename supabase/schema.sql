@@ -204,9 +204,9 @@ create table public.weekly_evaluations (
   )
 );
 
-create unique index weekly_evaluations_one_open_idx
-  on public.weekly_evaluations (va_id)
-  where status = 'open';
+-- More than one open week is allowed so a QA score or a competency can be
+-- saved for a week other than the one started from the profile. The Start
+-- weekly evaluation button in the app still allows only one open week.
 
 create table public.weekly_qa (
   id uuid primary key default gen_random_uuid(),
@@ -956,7 +956,7 @@ grant insert, delete on public.weekly_evaluations to authenticated;
 create policy weekly_evaluations_insert on public.weekly_evaluations
   for insert to authenticated
   with check (
-    public.app_role() in ('admin', 'onboarder')
+    public.app_role() in ('admin', 'onboarder', 'qa')
     and status = 'open'
     and outcome is null
     and score_snapshot is null

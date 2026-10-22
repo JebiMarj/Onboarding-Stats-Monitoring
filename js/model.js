@@ -519,6 +519,40 @@
     return { ev: ev };
   }
 
+  function recordOpenWeek(state, actor, input) {
+    if (!Perms.can(actor.role, 'qa') && !Perms.can(actor.role, 'evaluations') && !Perms.can(actor.role, 'competencies')) {
+      return fail('Your role cannot do that.');
+    }
+    var src = input || {};
+    if (!findVa(state, src.vaId)) return fail('VA not found.');
+    var weekStart = Dates.mondayOf(src.weekStart);
+    if (!weekStart) return fail('Weeks start on Monday.');
+    var existing = state.evaluations.find(function (ev) {
+      return ev.vaId === src.vaId && ev.weekStart === weekStart;
+    });
+    if (existing) {
+      if (existing.status === 'closed') return fail('This week is closed and its scores cannot be changed.');
+      return { ok: true, state: state, evaluation: existing };
+    }
+    var next = clone(state);
+    var ev = {
+      id: uid(),
+      vaId: src.vaId,
+      weekStart: weekStart,
+      status: 'open',
+      outcome: '',
+      gaps: '',
+      coachingActions: '',
+      scoreSnapshot: null,
+      closedBy: '',
+      closedAt: '',
+      createdBy: actor.id,
+      createdAt: new Date().toISOString()
+    };
+    next.evaluations.push(ev);
+    return { ok: true, state: next, evaluation: ev };
+  }
+
   function saveQa(state, actor, input) {
     var denied = gate(actor, 'qa');
     if (denied) return fail(denied);
@@ -540,6 +574,19 @@
     row.recordingUrl = recording.url;
     row.updatedBy = actor.id;
     return { ok: true, state: next, qa: row };
+  }
+
+  function saveQaForWeek(state, actor, input) {
+    var denied = gate(actor, 'qa');
+    if (denied) return fail(denied);
+    var opened = recordOpenWeek(state, actor, input);
+    if (!opened.ok) return opened;
+    return saveQa(opened.state, actor, {
+      evaluationId: opened.evaluation.id,
+      score: input.score,
+      formUrl: input.formUrl,
+      recordingUrl: input.recordingUrl
+    });
   }
 
   function deleteQa(state, actor, input) {
@@ -573,15 +620,28 @@
     var next = clone(state);
     if (!next.wbrDays) next.wbrDays = [];
     if (total.n == null && converted.n == null) {
+      if (src.asNew || src.id) return fail('Enter total leads or converted leads.');
       next.wbrDays = next.wbrDays.filter(function (row) {
         return !(row.vaId === src.vaId && row.workDate === src.workDate);
       });
       return { ok: true, state: next };
     }
-    var existing = next.wbrDays.find(function (row) {
+    var sameDate = next.wbrDays.find(function (row) {
       return row.vaId === src.vaId && row.workDate === src.workDate;
     });
-    var row = existing || {
+    if (src.id) {
+      var editing = next.wbrDays.find(function (row) { return row.id === src.id; });
+      if (!editing || editing.vaId !== src.vaId) return fail('WBR record not found.');
+      if (closedWeekCovers(next, editing.vaId, editing.workDate)) return fail('That day is in a closed week.');
+      if (sameDate && sameDate.id !== editing.id) return fail('That date already has a WBR record.');
+      editing.workDate = src.workDate;
+      editing.totalLeads = total.n;
+      editing.convertedLeads = converted.n;
+      editing.updatedBy = actor.id;
+      return { ok: true, state: next, wbrDay: editing };
+    }
+    if (src.asNew && sameDate) return fail('That date already has a WBR record.');
+    var row = sameDate || {
       id: uid(),
       vaId: src.vaId,
       workDate: src.workDate,
@@ -590,7 +650,7 @@
     row.totalLeads = total.n;
     row.convertedLeads = converted.n;
     row.updatedBy = actor.id;
-    if (!existing) next.wbrDays.push(row);
+    if (!sameDate) next.wbrDays.push(row);
     return { ok: true, state: next, wbrDay: row };
   }
 
@@ -635,6 +695,15 @@
     if (existing) stored.id = existing.id;
     next.competencies.push(stored);
     return { ok: true, state: next, competencies: stored };
+  }
+
+  function saveCompetenciesForWeek(state, actor, input) {
+    var denied = gate(actor, 'competencies');
+    if (denied) return fail(denied);
+    var opened = recordOpenWeek(state, actor, input);
+    if (!opened.ok) return opened;
+    var payload = Object.assign({}, input, { evaluationId: opened.evaluation.id });
+    return saveCompetencies(opened.state, actor, payload);
   }
 
   function deleteCompetencies(state, actor, input) {
@@ -811,10 +880,12 @@
     startEvaluation: startEvaluation,
     nextEvaluation: nextEvaluation,
     saveQa: saveQa,
+    saveQaForWeek: saveQaForWeek,
     deleteQa: deleteQa,
     saveWbrDay: saveWbrDay,
     deleteWbrDay: deleteWbrDay,
     saveCompetencies: saveCompetencies,
+    saveCompetenciesForWeek: saveCompetenciesForWeek,
     deleteCompetencies: deleteCompetencies,
     addCoaching: addCoaching,
     deleteCoaching: deleteCoaching,

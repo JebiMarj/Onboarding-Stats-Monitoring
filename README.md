@@ -4,7 +4,7 @@ Static site for weekly onboarding QA. There is no build step. Supabase provides 
 
 The screen uses the earlier rose and stone palette, with a top navigation bar across the page. Weekly attendance by minutes, competency comments, coaching actions, the KPI, and endorsement use that layout. The database underneath is the current schema.
 
-The hosted project already has that schema, with one admin profile and no VA rows. Do not run the reset again, and do not import old VA records. This repository does not add a migration. The SQL steps below are only for a brand-new database.
+The hosted project already has that schema, with one admin profile and no VA rows. Do not run the reset again, and do not import old VA records. Later schema changes live in `supabase/migrations` and stay unapplied until they are approved. The SQL steps below are only for a brand-new database.
 
 ## Files
 
@@ -67,13 +67,13 @@ Endorse is a separate admin action. It is allowed only when the status is Ready 
 
 Training completed → Add VA (name, onboarding start, onboarder, client, business, SOP or portfolio, status, schedule, batch) → Save. The name opens that person’s monitoring page.
 
-Start a weekly evaluation on a Monday. The next week is created with Next weekly evaluation after the current week is closed. One week per VA can be open.
+Start a weekly evaluation on a Monday from the card overview. The next week is created with Next weekly evaluation after the latest week is closed. That Start button still allows only one open week. Saving a QA score or a competency for another Monday opens that week as well.
 
-The Attendance card opens a completion panel and a daily table. Finalize attendance locks every row for that VA. An admin can undo it. Each saved day is Present, Late, or Absent, with late minutes, downtime minutes, and a remark. Eight hours is 480 minutes and scores 100%. A full-day absence is 0%. Otherwise the day is `(480 − late minutes − downtime minutes) / 480 × 100`, and it cannot go below 0. That per-minute rate is `ATTENDANCE_MINUTE_DEDUCTION` in `js/score.js`. Weekly attendance on the card is the average of the saved days in the selected week. A day with no row is left out of the average.
+The Attendance page is a completion panel and a daily table. Finalize attendance locks every row for that VA. An admin can undo it. + Add record stays on the page; after finalize it is disabled and the page says attendance is finalized. Each saved day is Present, Late, or Absent, with late minutes, downtime minutes, and a remark. Eight hours is 480 minutes and scores 100%. A full-day absence is 0%. Otherwise the day is `(480 − late minutes − downtime minutes) / 480 × 100`, and it cannot go below 0. That per-minute rate is `ATTENDANCE_MINUTE_DEDUCTION` in `js/score.js`. Weekly attendance on the card is the average of the saved days in the selected week. A day with no row is left out of the average.
 
-Weekly QA is a score from 0 to 100, an evaluation-form link, and a call-recording link. Links must be `http` or `https`, or blank. 80 or above is a pass and shows green. Below 80 is a fail and shows red.
+Weekly QA is a score from 0 to 100, an evaluation-form link, and a call-recording link. Links must be `http` or `https`, or blank. 80 or above shows a green pill. 79 and below shows a red pill. The pass mark in `js/score.js` is 80. Each row is labeled Week 1, Week 2, and so on from the Monday of the VA’s start date, with the Monday–Sunday dates beside it. + Add QA saves another week.
 
-WBR is one row per work day: total leads and converted leads. A day's rate is `converted / total × 100`, capped at 100. The week rate, which is the KPI section, is the sum of converted leads divided by the sum of total leads for days whose total is greater than zero. A blank or zero total is left out. If no day counts, that section drops out of the score.
+WBR is a table of saved days, newest first, added from + Add WBR. Each row is a date, total leads, and converted leads. A day's rate is `converted / total × 100`, capped at 100, and it is shown as the row is entered. The same VA and date cannot be saved twice. The week rate, which is the KPI section on the card overview, is the sum of converted leads divided by the sum of total leads for days whose total is greater than zero. A blank or zero total is left out. If no day counts, that section drops out of the score.
 
 Competencies are tool navigation, communication, critical thinking, and core values. Each is 0–100 and has its own comment. An onboarder enters them.
 
@@ -142,12 +142,14 @@ The top bar holds Onboarding (Board, Batches). Search, the theme control, and th
 
 The board counts are On the Roster, Number of Batches, Onboarding, Endorsed to Operations, and Resigned/Terminated. Onboarding includes Continue onboarding and Ready for endorsement. Resigned/Terminated includes Resigned and EOC. Each count filters the list under it. Number of Batches opens the Batches page. The list opens on Onboarding. The + button adds one VA or imports a CSV. The template is a header row only. The import shows a preview and does not save until every row is valid. A card opens the profile. Search is the control on the right of the bar, and the `/` key.
 
-The profile is a header plus eight cards: Attendance, QA score, WBR, Tool navigation, Critical thinking, Communication, Core values, and Feedback sessions. A card opens its inputs underneath. Weekly KPI, Close week, and Endorse stay below the cards. Status and movement history sit in the Status menu.
+The profile is a header plus eight cards: Attendance, QA score, WBR, Tool navigation, Critical thinking, Communication, Core values, and Feedback sessions. A card opens its own page for that section, with ← Back to the cards and ← Board. Weekly KPI, Close week, and Endorse stay on the card overview. Status and movement history sit in the Status menu.
 
 ## Schema change waiting for approval
 
 `supabase/migrations/20261022_daily_wbr_and_remarks.sql` adds `attendance_days.remarks` and a daily `wbr_days` table, then replaces `compute_kpi_snapshot`. It does not drop `weekly_wbr`.
 
-`supabase/migrations/20261022_finalize_attendance.sql` adds `va_profiles.attendance_finalized_at` and `attendance_finalized_by`. While those are set, attendance rows for that VA cannot be inserted, updated, or deleted. An onboarder or admin can set the lock. Only an admin can clear it. A closed week still blocks its own days after the lock is cleared.
+`supabase/migrations/20261022_finalize_attendance.sql` adds `va_profiles.attendance_finalized_at` and `attendance_finalized_by`. While those are set, attendance rows for that VA cannot be inserted, updated, or deleted. An onboarder or admin can set the lock. Only an admin can clear it. A closed week still blocks its own days after the lock is cleared. WBR rows can still be written while attendance is finalized.
 
-Do not apply either file until it is approved. `supabase/schema.sql` matches a fresh install and is not a migration for the database that is already live.
+`supabase/migrations/20261022_multiple_open_weeks.sql` drops the one-open-week index and lets an admin, onboarder, or QA insert an open weekly evaluation. That is what lets QA and competency pages save a week other than the one started from the profile. The Start button in the app still refuses a second open week.
+
+Do not apply these files until they are approved. `supabase/schema.sql` matches a fresh install and is not a migration for the database that is already live.

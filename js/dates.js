@@ -60,6 +60,32 @@
     return new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(dt);
   }
 
+  function formatMonthDay(iso) {
+    if (!isRealDate(iso)) return '';
+    var parts = parseISO(iso);
+    var dt = new Date(Date.UTC(parts.y, parts.m - 1, parts.d));
+    return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(dt);
+  }
+
+  function trainingWeekNumber(anchor, weekStart) {
+    var base = mondayOf(anchor);
+    var week = mondayOf(weekStart);
+    if (!base || !week) return null;
+    var from = Date.parse(base + 'T00:00:00Z');
+    var to = Date.parse(week + 'T00:00:00Z');
+    return Math.round((to - from) / (86400000 * 7)) + 1;
+  }
+
+  function weekRangeLabel(anchor, weekStart) {
+    var week = mondayOf(weekStart);
+    if (!week) return '';
+    var end = addDays(week, 6);
+    var range = formatMonthDay(week) + ' – ' + formatMonthDay(end);
+    var number = trainingWeekNumber(anchor, week);
+    if (number == null) return range;
+    return 'Week ' + number + ' · ' + range;
+  }
+
   function todayISO() {
     var now = new Date();
     return toISO(now.getFullYear(), now.getMonth() + 1, now.getDate());
@@ -74,6 +100,9 @@
     isMonday: isMonday,
     formatLong: formatLong,
     formatWeekday: formatWeekday,
+    formatMonthDay: formatMonthDay,
+    trainingWeekNumber: trainingWeekNumber,
+    weekRangeLabel: weekRangeLabel,
     todayISO: todayISO
   };
 });

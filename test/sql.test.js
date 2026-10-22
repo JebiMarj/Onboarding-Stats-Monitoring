@@ -411,6 +411,34 @@ test('Postgres formula matches the JavaScript formula and RLS enforces roles', {
     /permission denied|row-level security/i
   );
 
+  const extraA = await asUser(db, admin, () => db.query(
+    `insert into public.weekly_evaluations (va_id, week_start, status)
+     values ($1, '2026-11-02', 'open') returning id`,
+    [va.id]
+  ));
+  const extraB = await asUser(db, admin, () => db.query(
+    `insert into public.weekly_evaluations (va_id, week_start, status)
+     values ($1, '2026-11-09', 'open') returning id`,
+    [va.id]
+  ));
+  assert.ok(extraA.rows[0].id);
+  assert.ok(extraB.rows[0].id);
+  const openCount = await db.query(
+    `select count(*)::int as n from public.weekly_evaluations where va_id = $1 and status = 'open'`,
+    [va.id]
+  );
+  assert.equal(openCount.rows[0].n, 2);
+  await asUser(db, qa, () => db.query(
+    `insert into public.weekly_qa (evaluation_id, score) values ($1, 80)`,
+    [extraB.rows[0].id]
+  ));
+  const qaWeek = await asUser(db, qa, () => db.query(
+    `insert into public.weekly_evaluations (va_id, week_start, status)
+     values ($1, '2026-11-16', 'open') returning id`,
+    [va.id]
+  ));
+  assert.ok(qaWeek.rows[0].id);
+
   await expectThrow(
     db.exec(fs.readFileSync(path.join(root, 'supabase/reset_old_schema.sql'), 'utf8')),
     /Backup first/

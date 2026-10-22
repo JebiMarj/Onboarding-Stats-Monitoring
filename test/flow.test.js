@@ -279,3 +279,52 @@ test('the last admin cannot be demoted and a closed week is frozen', () => {
   assert.equal(state.vas[0].status, 'Resigned');
   assert.equal(Model.endorse(state, admin, { vaId: vaId }).error, 'Only a VA who is ready for endorsement can be endorsed.');
 });
+
+test('QA can be saved on a second open week and a new WBR date cannot repeat', () => {
+  let state = fresh();
+  state = must(Model.createBatch(state, admin, { name: 'Batch D' })).state;
+  state = must(Model.createVa(state, admin, {
+    fullName: 'Eva Flores',
+    onboardingStart: '2026-01-05',
+    batchId: state.batches[0].id
+  })).state;
+  const vaId = state.vas[0].id;
+  state = must(Model.startEvaluation(state, admin, { vaId: vaId, weekStart: '2026-01-05' })).state;
+  state = must(Model.saveQaForWeek(state, qa, {
+    vaId: vaId,
+    weekStart: '2026-01-12',
+    score: 79,
+    formUrl: 'https://example.com/form',
+    recordingUrl: 'https://example.com/call'
+  })).state;
+  assert.equal(state.evaluations.filter((ev) => ev.status === 'open').length, 2);
+  const second = state.evaluations.find((ev) => ev.weekStart === '2026-01-12');
+  assert.equal(state.qa.find((row) => row.evaluationId === second.id).score, 79);
+  assert.equal(Model.startEvaluation(state, admin, { vaId: vaId, weekStart: '2026-01-19' }).error, 'This VA already has an open week.');
+  state = must(Model.saveQaForWeek(state, qa, { vaId: vaId, weekStart: '2026-01-05', score: 90 })).state;
+  assert.equal(state.evaluations.length, 2);
+  const first = state.evaluations.find((ev) => ev.weekStart === '2026-01-05');
+  assert.equal(state.qa.find((row) => row.evaluationId === first.id).score, 90);
+  state = must(Model.saveCompetenciesForWeek(state, onboarder, {
+    vaId: vaId,
+    weekStart: '2026-01-19',
+    toolNavigation: 80,
+    toolNavigationComment: 'Knows the dialer.'
+  })).state;
+  assert.equal(state.evaluations.filter((ev) => ev.weekStart === '2026-01-19').length, 1);
+
+  state = must(Model.saveWbrDay(state, admin, { vaId: vaId, workDate: '2026-01-06', totalLeads: 10, convertedLeads: 4 })).state;
+  const row = state.wbrDays.find((item) => item.workDate === '2026-01-06');
+  assert.equal(Model.saveWbrDay(state, admin, {
+    vaId: vaId, asNew: true, workDate: '2026-01-06', totalLeads: 8, convertedLeads: 2
+  }).error, 'That date already has a WBR record.');
+  state = must(Model.saveWbrDay(state, admin, { vaId: vaId, workDate: '2026-01-06', totalLeads: 8, convertedLeads: 2 })).state;
+  assert.equal(state.wbrDays.find((item) => item.workDate === '2026-01-06').totalLeads, 8);
+  state = must(Model.saveWbrDay(state, admin, { vaId: vaId, asNew: true, workDate: '2026-01-07', totalLeads: 5, convertedLeads: 1 })).state;
+  assert.equal(Model.saveWbrDay(state, admin, {
+    id: row.id, vaId: vaId, workDate: '2026-01-07', totalLeads: 5, convertedLeads: 1
+  }).error, 'That date already has a WBR record.');
+  assert.equal(Model.saveWbrDay(state, admin, {
+    asNew: true, vaId: vaId, workDate: '2026-01-08', totalLeads: '', convertedLeads: ''
+  }).error, 'Enter total leads or converted leads.');
+});
