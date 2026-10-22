@@ -232,6 +232,9 @@
       endorsedBy: va.endorsedBy || '',
       endorsedAt: va.endorsedAt || '',
       endorsedByName: personName(state, va.endorsedBy),
+      attendanceFinalizedAt: va.attendanceFinalizedAt || '',
+      attendanceFinalizedBy: va.attendanceFinalizedBy || '',
+      attendanceFinalizedByName: personName(state, va.attendanceFinalizedBy),
       attendance: state.attendance
         .filter(function (row) { return row.vaId === va.id; })
         .sort(function (a, b) { return a.workDate < b.workDate ? -1 : 1; }),
@@ -333,6 +336,8 @@
       batchId: src.batchId,
       endorsedBy: '',
       endorsedAt: '',
+      attendanceFinalizedAt: '',
+      attendanceFinalizedBy: '',
       createdBy: actor.id,
       createdAt: new Date().toISOString()
     };
@@ -387,7 +392,9 @@
     var denied = gate(actor, 'attendance');
     if (denied) return fail(denied);
     var src = input || {};
-    if (!findVa(state, src.vaId)) return fail('VA not found.');
+    var va = findVa(state, src.vaId);
+    if (!va) return fail('VA not found.');
+    if (va.attendanceFinalizedAt) return fail('Attendance is finalized.');
     if (!Dates.isRealDate(src.workDate)) return fail('Enter a work day.');
     if (closedWeekCovers(state, src.vaId, src.workDate)) return fail('That day is in a closed week.');
     var absent = src.absent === true || src.absent === 'true' || src.absent === 'on' || src.absent === 1;
@@ -396,15 +403,27 @@
     var down = wholeMinutes(absent ? 0 : src.downtimeMinutes, 'Downtime minutes must be a whole number, zero or more.');
     if (!down.ok) return fail(down.error);
     var next = clone(state);
-    var existing = next.attendance.find(function (row) {
-      return row.vaId === src.vaId && row.workDate === src.workDate;
-    });
+    var existing = null;
+    if (src.id) {
+      existing = next.attendance.find(function (row) { return row.id === src.id; });
+      if (!existing || existing.vaId !== src.vaId) return fail('Attendance record not found.');
+      if (closedWeekCovers(next, existing.vaId, existing.workDate)) return fail('That day is in a closed week.');
+      var clash = next.attendance.some(function (row) {
+        return row.id !== existing.id && row.vaId === src.vaId && row.workDate === src.workDate;
+      });
+      if (clash) return fail('That day already has an attendance record.');
+    } else {
+      existing = next.attendance.find(function (row) {
+        return row.vaId === src.vaId && row.workDate === src.workDate;
+      });
+    }
     var row = existing || {
       id: uid(),
       vaId: src.vaId,
       workDate: src.workDate,
       createdBy: actor.id
     };
+    row.workDate = src.workDate;
     row.absent = absent;
     row.lateMinutes = absent ? 0 : late.n;
     row.downtimeMinutes = absent ? 0 : down.n;
@@ -420,9 +439,35 @@
     var next = clone(state);
     var row = next.attendance.find(function (item) { return item.id === (input && input.id); });
     if (!row) return fail('Attendance record not found.');
+    var owner = findVa(next, row.vaId);
+    if (owner && owner.attendanceFinalizedAt) return fail('Attendance is finalized.');
     if (closedWeekCovers(next, row.vaId, row.workDate)) return fail('That day is in a closed week.');
     next.attendance = next.attendance.filter(function (item) { return item.id !== row.id; });
     return { ok: true, state: next };
+  }
+
+  function finalizeAttendance(state, actor, input) {
+    var denied = gate(actor, 'attendance');
+    if (denied) return fail(denied);
+    var next = clone(state);
+    var va = findVa(next, input && input.vaId);
+    if (!va) return fail('VA not found.');
+    if (va.attendanceFinalizedAt) return fail('Attendance is already finalized.');
+    va.attendanceFinalizedAt = new Date().toISOString();
+    va.attendanceFinalizedBy = actor.id;
+    return { ok: true, state: next, va: va };
+  }
+
+  function undoFinalizeAttendance(state, actor, input) {
+    var denied = gate(actor, 'undo_attendance');
+    if (denied) return fail(denied);
+    var next = clone(state);
+    var va = findVa(next, input && input.vaId);
+    if (!va) return fail('VA not found.');
+    if (!va.attendanceFinalizedAt) return fail('Attendance is not finalized.');
+    va.attendanceFinalizedAt = '';
+    va.attendanceFinalizedBy = '';
+    return { ok: true, state: next, va: va };
   }
 
   function startEvaluation(state, actor, input) {
@@ -761,6 +806,8 @@
     setManualStatus: setManualStatus,
     saveAttendance: saveAttendance,
     deleteAttendance: deleteAttendance,
+    finalizeAttendance: finalizeAttendance,
+    undoFinalizeAttendance: undoFinalizeAttendance,
     startEvaluation: startEvaluation,
     nextEvaluation: nextEvaluation,
     saveQa: saveQa,

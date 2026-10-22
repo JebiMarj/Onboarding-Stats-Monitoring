@@ -27,7 +27,22 @@ function scores(overrides) {
 
 test('a full day with no lost minutes is 100%', () => {
   assert.equal(Score.dailyAttendancePercent({ absent: false, lateMinutes: 0, downtimeMinutes: 0 }), 100);
+  assert.equal(Score.ATTENDANCE_MINUTE_DEDUCTION, 100 / 480);
   assert.equal(Score.dailyAttendancePercent({ lateMinutes: 60, downtimeMinutes: 0 }), 87.5);
+  assert.equal(
+    Score.dailyAttendancePercent({ lateMinutes: 60, downtimeMinutes: 30 }),
+    Math.max(0, 100 - (60 + 30) * Score.ATTENDANCE_MINUTE_DEDUCTION)
+  );
+  const lateDay = Score.describeDailyAttendance({ lateMinutes: 60, downtimeMinutes: 0 });
+  assert.equal(lateDay.percent, 87.5);
+  assert.equal(lateDay.formula, '(480 − 60 − 0) ÷ 480 × 100');
+  assert.equal(Score.attendanceRuleText(), '(480 − late − downtime) ÷ 480 × 100');
+  const absentDay = Score.describeDailyAttendance({ absent: true, lateMinutes: 15, downtimeMinutes: 20 });
+  assert.equal(absentDay.percent, 0);
+  assert.equal(absentDay.formula, 'Absent = 0%');
+  assert.equal(Score.attendanceStatus({ lateMinutes: 5 }), 'Late');
+  assert.equal(Score.attendanceStatus({ downtimeMinutes: 10 }), 'Present');
+  assert.equal(Score.attendanceStatus({ absent: true }), 'Absent');
 });
 
 test('lost minutes reduce the day from 480', () => {

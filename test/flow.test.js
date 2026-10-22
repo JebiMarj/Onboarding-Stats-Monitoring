@@ -30,6 +30,8 @@ test('roles match the database matrix', () => {
   assert.equal(Perms.can('onboarder', 'settings'), false);
   assert.equal(Perms.can('admin', 'endorse'), true);
   assert.equal(Perms.can('admin', 'users'), true);
+  assert.equal(Perms.can('admin', 'undo_attendance'), true);
+  assert.equal(Perms.can('onboarder', 'undo_attendance'), false);
 });
 
 test('the weekly flow, batch ids, and role gates', () => {
@@ -144,6 +146,41 @@ test('the weekly flow, batch ids, and role gates', () => {
   assert.equal(endorsement.changedBy, admin.id);
   assert.equal(endorsement.note, 'Endorsed');
   assert.ok(endorsement.changedAt);
+});
+
+test('finalizing attendance locks every row until an admin undoes it', () => {
+  let state = fresh();
+  state = must(Model.createBatch(state, admin, { name: 'Batch A' })).state;
+  state = must(Model.createVa(state, admin, {
+    fullName: 'Ada Cruz',
+    onboardingStart: '2026-10-12',
+    batchId: state.batches[0].id
+  })).state;
+  const vaId = state.vas[0].id;
+  state = must(Model.saveAttendance(state, onboarder, {
+    vaId, workDate: '2026-10-12', absent: false, lateMinutes: 0, downtimeMinutes: 0, remarks: 'On time'
+  })).state;
+  const rowId = state.attendance[0].id;
+  assert.equal(state.attendance[0].remarks, 'On time');
+  assert.equal(Model.finalizeAttendance(state, qa, { vaId }).error, 'Your role cannot do that.');
+  state = must(Model.finalizeAttendance(state, onboarder, { vaId })).state;
+  const shown = Model.presentVa(state, vaId);
+  assert.equal(shown.attendanceFinalizedBy, onboarder.id);
+  assert.equal(shown.attendanceFinalizedByName, 'Local onboarder');
+  assert.match(shown.attendanceFinalizedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(Model.saveAttendance(state, admin, {
+    vaId, workDate: '2026-10-13', lateMinutes: 0, downtimeMinutes: 0
+  }).error, 'Attendance is finalized.');
+  assert.equal(Model.deleteAttendance(state, admin, { id: rowId }).error, 'Attendance is finalized.');
+  assert.equal(Model.finalizeAttendance(state, admin, { vaId }).error, 'Attendance is already finalized.');
+  assert.equal(Model.undoFinalizeAttendance(state, onboarder, { vaId }).error, 'Your role cannot do that.');
+  state = must(Model.undoFinalizeAttendance(state, admin, { vaId })).state;
+  assert.equal(Model.presentVa(state, vaId).attendanceFinalizedAt, '');
+  state = must(Model.saveAttendance(state, onboarder, {
+    vaId, workDate: '2026-10-13', lateMinutes: 60, downtimeMinutes: 0, remarks: 'Traffic'
+  })).state;
+  assert.equal(state.attendance.find((row) => row.workDate === '2026-10-13').remarks, 'Traffic');
+  assert.equal(Score.dailyAttendancePercent(state.attendance.find((row) => row.workDate === '2026-10-13')), 87.5);
 });
 
 test('WBR, competencies, and comments feed the score and coaching does not', () => {

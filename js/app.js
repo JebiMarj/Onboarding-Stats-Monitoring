@@ -405,6 +405,10 @@
       document.getElementById('mod').addEventListener('change', function (event) {
         if (event.target.id === 'batchId') toggleNewBatch();
         if (event.target.id === 'csv-file' && event.target.files && event.target.files[0]) readCsvFile(event.target.files[0]);
+        if (event.target.id === 'att-status' || event.target.id === 'att-date') refreshAttendanceDraft();
+      });
+      document.getElementById('mod').addEventListener('input', function (event) {
+        if (event.target.closest && event.target.closest('#att-form')) refreshAttendanceDraft();
       });
       document.getElementById('mod').addEventListener('submit', onModalSubmit);
       document.getElementById('pal').addEventListener('click', function (event) {
@@ -663,23 +667,53 @@
     return '<div class="card"><p class="mu">Start the weekly evaluation below, then come back to this card.</p></div>';
   }
 
+  function scoreText(value) {
+    if (value == null || value === '' || !Number.isFinite(Number(value))) return '—';
+    return (Math.round(Number(value) * 100) / 100).toFixed(2) + '%';
+  }
+
+  function attendanceFinalized(va) {
+    return !!(va && va.attendanceFinalizedAt);
+  }
+
+  function finalizedLine(va) {
+    var day = String(va.attendanceFinalizedAt || '').slice(0, 10);
+    var when = CNRDates.formatLong(day) || day;
+    var who = va.attendanceFinalizedByName || 'Unknown user';
+    return 'on ' + when + ' by ' + who + '.';
+  }
+
   function attendanceDetail(va, span) {
-    var byDate = {};
-    (va.attendance || []).forEach(function (row) { byDate[row.workDate] = row; });
-    var editable = can('attendance');
-    var days = weekDates(span.weekStart).map(function (date) {
-      var row = byDate[date] || null;
-      var locked = dayLocked(va, date) || !editable;
-      var absent = row ? row.absent : false;
-      var late = row ? field(row.lateMinutes) : '';
-      var down = row ? field(row.downtimeMinutes) : '';
-      var remarks = row ? row.remarks || '' : '';
-      var shown = row ? pct(CNRScore.dailyAttendancePercent(row)) : '—';
-      var save = locked ? '' : '<button type="submit" class="s">Save</button>';
-      var remove = row && !locked ? '<button type="button" class="g s" data-action="delete-attendance" data-id="' + esc(row.id) + '">Remove</button>' : '';
-      return '<form class="day" data-form="attendance" data-date="' + esc(date) + '" data-locked="' + (locked ? '1' : '0') + '" data-saved="' + (row ? '1' : '0') + '"><div><b>' + esc(CNRDates.formatWeekday(date)) + '</b><small>' + esc(CNRDates.formatLong(date)) + '</small></div><label>Absent <input type="checkbox" name="absent"' + (absent ? ' checked' : '') + (locked ? ' disabled' : '') + '></label><label class="field">Late min<input name="late" inputmode="numeric" value="' + esc(absent ? '0' : late) + '"' + (locked || absent ? ' disabled' : '') + '></label><label class="field">Downtime<input name="down" inputmode="numeric" value="' + esc(absent ? '0' : down) + '"' + (locked || absent ? ' disabled' : '') + '></label><label class="field">Remarks<input name="remarks" value="' + esc(remarks) + '" placeholder="Late, downtime, or absent"' + (locked ? ' disabled' : '') + '></label><b data-pct>' + esc(shown) + '</b><div class="actions">' + save + remove + '</div></form>';
-    }).join('');
-    return '<div class="card"><h2>Attendance</h2><p class="mu">Each day: absent, late minutes, downtime minutes, and a remark. Eight hours is 480 minutes and 100%. Late and downtime deduct in proportion. A full-day absence is 0%. The card averages the days in this week.</p></div><div class="days">' + days + '</div>';
+    var finalized = attendanceFinalized(va);
+    var editable = can('attendance') && !finalized;
+    var lock = '<div class="card att-lock"><p>Finalize only when all training attendance days have been recorded.</p>';
+    if (finalized) {
+      lock += '<p class="att-done"><b>Finalized</b> ' + esc(finalizedLine(va)) + '</p>';
+      if (can('undo_attendance')) lock += '<button type="button" class="g" data-action="undo-finalize">Undo finalize</button>';
+    } else if (can('attendance')) {
+      lock += '<button type="button" class="att-finalize" data-action="finalize-attendance">Finalize attendance</button>';
+    }
+    lock += '</div>';
+    var add = editable ? '<button type="button" class="att-add" data-action="add-attendance">+ Add record</button>' : '';
+    var rows = (va.attendance || []).slice().sort(function (a, b) {
+      return a.workDate < b.workDate ? 1 : a.workDate > b.workDate ? -1 : 0;
+    });
+    var body = rows.length ? rows.map(function (row) {
+      var status = CNRScore.attendanceStatus(row);
+      var tone = status === 'Late' ? 'late' : status === 'Absent' ? 'absent' : 'present';
+      var score = CNRScore.dailyAttendancePercent(row);
+      var notes = row.remarks ? esc(row.remarks) : '—';
+      var weekLocked = dayLocked(va, row.workDate);
+      var change = editable && !weekLocked;
+      var actions = '<button type="button" class="att-link" data-action="view-attendance" data-id="' + esc(row.id) + '">View</button>';
+      if (change) {
+        actions += '<span class="sep">/</span><button type="button" class="att-link" data-action="edit-attendance" data-id="' + esc(row.id) + '">Edit</button>'
+          + '<button type="button" class="att-trash" data-action="delete-attendance" data-id="' + esc(row.id) + '" aria-label="Delete"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg></button>';
+      }
+      return '<tr data-id="' + esc(row.id) + '" data-date="' + esc(row.workDate) + '" data-score="' + esc(score) + '"><td>' + esc(CNRDates.formatLong(row.workDate)) + '</td><td><span class="att-pill ' + tone + '">' + esc(status) + '</span></td><td>' + esc(row.lateMinutes) + '</td><td>' + esc(row.downtimeMinutes) + '</td><td><span class="att-score">' + esc(scoreText(score)) + '</span></td><td>' + notes + '</td><td><div class="att-actions">' + actions + '</div></td></tr>';
+    }).join('') : '';
+    var weekValue = pct(weekAttendance(va, span));
+    return lock + '<div class="card att-card" id="attendance-panel" data-week-start="' + esc(span.weekStart) + '" data-week-end="' + esc(span.weekEnd) + '" data-week-pct="' + esc(weekValue) + '"><div class="att-head"><div><h2>Attendance</h2><p class="mu">A daily picture of consistency and punctuality.</p></div>' + add + '</div><div class="att-wrap"><table class="att-table"><thead><tr><th>Date</th><th>Status</th><th>Late (min)</th><th>Downtime (min)</th><th>Daily score</th><th>Reason / notes</th><th>Actions</th></tr></thead><tbody id="att-rows">' + body + '</tbody></table></div></div>';
   }
 
   function qaDetail(va, ev) {
@@ -881,45 +915,49 @@
     }
   }
 
-  function updateDayPercent(form) {
-    if (!form || form.dataset.form !== 'attendance') return;
-    var absent = !!(form.absent && form.absent.checked);
-    var locked = form.dataset.locked === '1';
-    if (form.late) form.late.disabled = locked || absent;
-    if (form.down) form.down.disabled = locked || absent;
-    var el = form.querySelector('[data-pct]');
-    if (!el || locked && !form.late.value && !form.down.value && !absent && el.textContent === '—') return;
-    var has = absent || (form.late && form.late.value !== '') || (form.down && form.down.value !== '') || el.textContent !== '—';
-    if (!has) return;
-    el.textContent = pct(CNRScore.dailyAttendancePercent({
+  function refreshAttendanceDraft() {
+    var form = document.getElementById('att-form');
+    if (!form || form.dataset.mode === 'view') return;
+    var statusEl = document.getElementById('att-status');
+    var lateEl = document.getElementById('att-late');
+    var downEl = document.getElementById('att-down');
+    var dateEl = document.getElementById('att-date');
+    if (!statusEl || !lateEl || !downEl || !dateEl) return;
+    var status = statusEl.value;
+    var absent = status === 'Absent';
+    var lateOff = absent || status === 'Present';
+    if (status !== 'Late') lateEl.value = '0';
+    if (absent) downEl.value = '0';
+    lateEl.disabled = lateOff;
+    downEl.disabled = absent;
+    var described = CNRScore.describeDailyAttendance({
       absent: absent,
-      lateMinutes: absent ? 0 : form.late.value,
-      downtimeMinutes: absent ? 0 : form.down.value
-    }));
+      lateMinutes: lateOff ? 0 : lateEl.value,
+      downtimeMinutes: absent ? 0 : downEl.value
+    });
+    var scoreEl = document.getElementById('att-score');
+    var formulaEl = document.getElementById('att-formula');
+    if (scoreEl) scoreEl.textContent = scoreText(described.percent);
+    if (formulaEl) formulaEl.textContent = described.formula;
+    var panel = document.getElementById('attendance-panel');
+    var card = document.getElementById('card-attendance');
+    if (!panel || !card) return;
+    var date = dateEl.value;
+    var start = panel.dataset.weekStart;
+    var end = panel.dataset.weekEnd;
+    var exclude = form.dataset.id || '';
+    var scores = [];
+    document.querySelectorAll('#att-rows tr[data-date]').forEach(function (row) {
+      if (exclude && row.dataset.id === exclude) return;
+      if (row.dataset.date < start || row.dataset.date > end) return;
+      scores.push(Number(row.dataset.score));
+    });
+    if (date && date >= start && date <= end) scores.push(described.percent);
+    card.querySelector('b').textContent = scores.length ? pct(CNRScore.weeklyAttendance(scores)) : '—';
   }
 
   function refreshLive() {
-    document.querySelectorAll('form.day').forEach(function (form) {
-      if (form.dataset.form === 'attendance') updateDayPercent(form);
-    });
-    var attendance = [];
-    document.querySelectorAll('form[data-form="attendance"]').forEach(function (form) {
-      var absent = !!(form.absent && form.absent.checked);
-      var late = form.late ? form.late.value : '';
-      var down = form.down ? form.down.value : '';
-      var remarks = form.remarks ? form.remarks.value.trim() : '';
-      var saved = form.dataset.saved === '1';
-      if (!(saved || absent || late !== '' || down !== '' || remarks)) return;
-      attendance.push(CNRScore.dailyAttendancePercent({
-        absent: absent,
-        lateMinutes: absent ? 0 : late,
-        downtimeMinutes: absent ? 0 : down
-      }));
-    });
-    var attendanceCard = document.getElementById('card-attendance');
-    if (attendanceCard && document.querySelector('form[data-form="attendance"]')) {
-      attendanceCard.querySelector('b').textContent = pct(CNRScore.weeklyAttendance(attendance));
-    }
+    refreshAttendanceDraft();
     var total = 0;
     var converted = 0;
     var any = false;
@@ -967,7 +1005,8 @@
   function onInput(event) {
     if (event.target.id && event.target.id.indexOf('weight-') === 0 || event.target.id === 'pass-mark') weightSumText();
     var form = event.target.form;
-    if (form && (form.dataset.form === 'attendance' || form.dataset.form === 'wbr')) refreshLive();
+    if (form && form.dataset.form === 'wbr') refreshLive();
+    if (event.target.closest && event.target.closest('#att-form')) refreshAttendanceDraft();
     if (event.target.id === 'qa-score') refreshLive();
     if (event.target.id && COMPS.some(function (item) { return item[0] === event.target.id; })) refreshLive();
   }
@@ -1035,7 +1074,24 @@
         state.renameDraft = '';
         return render();
       }
+      if (name === 'add-attendance') return openAttendanceModal(cache.current, null, 'add');
+      if (name === 'view-attendance' || name === 'edit-attendance') {
+        var record = (cache.current.attendance || []).filter(function (row) { return row.id === action.dataset.id; })[0];
+        if (!record) return;
+        return openAttendanceModal(cache.current, record, name === 'view-attendance' ? 'view' : 'edit');
+      }
+      if (name === 'finalize-attendance') {
+        if (!window.confirm('Finalize attendance? Records cannot be added, edited, or deleted until an admin undoes this.')) return;
+        await CNRStore.finalizeAttendance(route.vaId);
+        return navigate(profileHash(route.vaId, 'attendance', route.week), 'Attendance finalized.');
+      }
+      if (name === 'undo-finalize') {
+        if (!window.confirm('Undo finalized attendance? Records can be edited again.')) return;
+        await CNRStore.undoFinalizeAttendance(route.vaId);
+        return navigate(profileHash(route.vaId, 'attendance', route.week), 'Attendance can be edited again.');
+      }
       if (name === 'delete-attendance') {
+        if (!window.confirm('Delete this attendance record?')) return;
         await CNRStore.deleteAttendance(action.dataset.id);
         return navigate(profileHash(route.vaId, 'attendance', route.week), 'Attendance removed.');
       }
@@ -1087,17 +1143,6 @@
         if (!monday) throw new Error('Enter a week.');
         await CNRStore.startEvaluation(route.vaId, monday);
         return navigate(profileHash(route.vaId, route.focus, monday), 'Week started.');
-      }
-      if (form.dataset.form === 'attendance') {
-        await CNRStore.saveAttendance({
-          vaId: route.vaId,
-          workDate: form.dataset.date,
-          absent: form.absent.checked,
-          lateMinutes: form.late.value,
-          downtimeMinutes: form.down.value,
-          remarks: form.remarks.value
-        });
-        return navigate(profileHash(route.vaId, 'attendance', route.week), 'Attendance saved.');
       }
       if (form.dataset.form === 'wbr') {
         await CNRStore.saveWbrDay({
@@ -1247,9 +1292,41 @@
   }
 
   function closeModal() {
+    var panel = document.getElementById('attendance-panel');
+    var card = document.getElementById('card-attendance');
+    if (panel && card && panel.dataset.weekPct) card.querySelector('b').textContent = panel.dataset.weekPct;
     var mod = document.getElementById('mod');
     mod.style.display = 'none';
     mod.innerHTML = '';
+  }
+
+  function openAttendanceModal(va, row, mode) {
+    if (!va) return;
+    var viewing = mode === 'view';
+    var editing = mode === 'edit';
+    var status = row ? CNRScore.attendanceStatus(row) : 'Present';
+    var title = viewing ? 'View Attendance' : editing ? 'Edit Attendance' : 'Add Attendance';
+    var sub = esc(va.fullName) + ' · ' + (row ? 'Evaluation record' : 'New evaluation record');
+    var dis = viewing ? ' disabled' : '';
+    var options = ['Present', 'Late', 'Absent'].map(function (item) {
+      return '<option' + (item === status ? ' selected' : '') + '>' + item + '</option>';
+    }).join('');
+    var late = row && !row.absent ? field(row.lateMinutes) : '0';
+    var down = row && !row.absent ? field(row.downtimeMinutes) : '0';
+    var notes = row ? row.remarks || '' : '';
+    var date = row ? row.workDate : CNRDates.todayISO();
+    var save = viewing ? '' : '<button type="submit">Save record</button>';
+    var mod = document.getElementById('mod');
+    mod.innerHTML = '<form class="box att-box" id="att-form" data-mode="' + mode + '" data-id="' + (row ? esc(row.id) : '') + '"><h2>' + title + '</h2><p class="mu">' + sub + '</p><div class="fields"><label class="field">Date<input id="att-date" type="date" required value="' + esc(date) + '"' + dis + '></label><label class="field">Attendance status<select id="att-status"' + dis + '>' + options + '</select></label><label class="field">Late minutes<input id="att-late" inputmode="numeric" value="' + esc(late) + '"' + dis + '></label><label class="field">Downtime minutes<input id="att-down" inputmode="numeric" value="' + esc(down) + '"' + dis + '></label></div><label class="field">Notes<textarea id="att-notes"' + dis + '>' + esc(notes) + '</textarea></label><div class="att-scorebox"><span>Daily score</span><b id="att-score"></b><p id="att-formula"></p><p class="mu">' + esc(CNRScore.ATTENDANCE_FLOOR_NOTE) + '</p></div><p id="mod-err" class="rename-err"></p><div class="actions"><button type="button" class="g" data-action="cancel-modal">Cancel</button>' + save + '</div></form>';
+    mod.style.display = 'flex';
+    if (viewing) {
+      var described = CNRScore.describeDailyAttendance(row);
+      document.getElementById('att-score').textContent = scoreText(described.percent);
+      document.getElementById('att-formula').textContent = described.formula;
+    } else {
+      refreshAttendanceDraft();
+      document.getElementById('att-date').focus();
+    }
   }
 
   function parseCsv(text) {
@@ -1358,10 +1435,41 @@
     mod.style.display = 'flex';
   }
 
+  async function saveAttendanceModal(form) {
+    var err = document.getElementById('mod-err');
+    err.textContent = '';
+    var route = readRoute();
+    var status = document.getElementById('att-status').value;
+    var absent = status === 'Absent';
+    var late = document.getElementById('att-late').value;
+    var down = document.getElementById('att-down').value;
+    if (status === 'Present') late = '0';
+    if (status === 'Late' && !(Number(late) > 0)) {
+      err.textContent = 'Enter the late minutes.';
+      return;
+    }
+    try {
+      await CNRStore.saveAttendance({
+        id: form.dataset.id || '',
+        vaId: route.vaId,
+        workDate: document.getElementById('att-date').value,
+        absent: absent,
+        lateMinutes: absent ? 0 : late,
+        downtimeMinutes: absent ? 0 : down,
+        remarks: document.getElementById('att-notes').value
+      });
+      closeModal();
+      navigate(profileHash(route.vaId, 'attendance', route.week), 'Attendance saved.');
+    } catch (ex) {
+      err.textContent = ex.message || 'Something went wrong.';
+    }
+  }
+
   async function onModalSubmit(event) {
     var form = event.target;
-    if (!form || (form.id !== 'va-form' && form.id !== 'import-form')) return;
+    if (!form || (form.id !== 'va-form' && form.id !== 'import-form' && form.id !== 'att-form')) return;
     event.preventDefault();
+    if (form.id === 'att-form') return saveAttendanceModal(form);
     if (form.id === 'import-form') {
       var importErr = document.getElementById('mod-err');
       importErr.textContent = '';

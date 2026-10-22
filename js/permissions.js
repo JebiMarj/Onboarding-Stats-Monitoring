@@ -17,7 +17,8 @@
     qa: ['admin', 'qa'],
     settings: ['admin'],
     users: ['admin'],
-    endorse: ['admin']
+    endorse: ['admin'],
+    undo_attendance: ['admin']
   };
 
   function can(role, action) {
