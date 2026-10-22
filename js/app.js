@@ -54,7 +54,14 @@
     ['coreValues', 'coreValuesComment', 'Core values']
   ];
 
-  var state = { flash: '', error: '', keepFlash: false, status: 'All', dirQuery: '', renaming: '', renameError: '', renameDraft: '' };
+  var BOARD_GROUPS = [
+    { id: 'roster', label: 'On the Roster' },
+    { id: 'batches', label: 'Number of Batches', href: '#/batches' },
+    { id: 'onboarding', label: 'Onboarding' },
+    { id: 'endorsed', label: 'Endorsed to Operations' },
+    { id: 'resigned', label: 'Resigned/Terminated' }
+  ];
+  var state = { flash: '', error: '', keepFlash: false, status: 'All', dirQuery: '', boardFilter: 'onboarding', renaming: '', renameError: '', renameDraft: '' };
   var cache = { vas: [] };
   var renderSeq = 0;
   var listening = false;
@@ -428,7 +435,7 @@
       cache.vas = await CNRStore.listVas();
       if (seq !== renderSeq) return;
       var html = '';
-      if (route.key === 'dash') html = viewBoard();
+      if (route.key === 'dash') html = await viewBoard();
       else if (route.key === 'prof') html = await viewProfile(route);
       else if (route.key === 'bat') html = await viewBatches();
       else html = await viewSettings();
@@ -452,13 +459,31 @@
     if (panel) panel.hidden = true;
   }
 
-  function viewBoard() {
-    var counts = { All: cache.vas.length };
-    CNRLabels.STATUSES.forEach(function (status) { counts[status] = 0; });
-    cache.vas.forEach(function (va) { counts[va.status] = (counts[va.status] || 0) + 1; });
-    var chips = ''
-      + kpi('On the roster', counts.All)
-      + kpi('Onboarding', counts.Onboarding || 0);
+  function inBoardGroup(va, group) {
+    if (group === 'roster') return true;
+    if (group === 'onboarding') {
+      return va.status === 'Onboarding' || va.status === 'Continue onboarding' || va.status === 'Ready for endorsement';
+    }
+    if (group === 'endorsed') return va.status === 'Endorsed';
+    if (group === 'resigned') return va.status === 'Resigned' || va.status === 'EOC';
+    return false;
+  }
+
+  async function viewBoard() {
+    var batches = await CNRStore.listBatches();
+    var filter = state.boardFilter || 'onboarding';
+    if (!BOARD_GROUPS.some(function (group) { return group.id === filter && !group.href; })) filter = 'onboarding';
+    var counts = {
+      roster: cache.vas.length,
+      batches: batches.length,
+      onboarding: cache.vas.filter(function (va) { return inBoardGroup(va, 'onboarding'); }).length,
+      endorsed: cache.vas.filter(function (va) { return inBoardGroup(va, 'endorsed'); }).length,
+      resigned: cache.vas.filter(function (va) { return inBoardGroup(va, 'resigned'); }).length
+    };
+    var chips = BOARD_GROUPS.map(function (group) {
+      if (group.href) return kpiLink(group.href, group.label, counts.batches);
+      return kpiButton(group.id, group.label, counts[group.id], filter === group.id);
+    }).join('');
     var add = '';
     if (can('manage_va')) {
       add = '<div class="addbox" id="addbox"><button type="button" class="plus" id="board-add" data-action="add-menu" aria-label="Add VAs" aria-haspopup="menu" aria-controls="add-pop">+</button>'
@@ -469,23 +494,24 @@
         + '</div></div>';
     }
     var empty = cache.vas.length ? '' : '<div class="card emptyqa"><h2>No VAs yet</h2><p>' + (can('manage_va') ? 'Use + to add one VA, or import a CSV. The board starts empty.' : 'The board starts empty.') + '</p></div>';
-    var onboarding = cache.vas.filter(function (va) { return va.status === 'Onboarding'; });
-    var elsewhere = cache.vas.length - onboarding.length;
-    var column = '<section class="col"><h3>Onboarding <i class="b">' + onboarding.length + '</i></h3>'
-      + (onboarding.length ? onboarding.map(card).join('') : '<p class="mu sm">No one in this stage</p>') + '</section>';
-    var other = elsewhere
-      ? '<p class="mu">' + elsewhere + (elsewhere === 1 ? ' VA is' : ' VAs are') + ' in another stage. Search opens their profiles.</p>'
-      : '';
-    return '<div class="boardhead"><div><h1>Onboarding Board</h1><p class="lead">Open a card to see that VA.</p></div>' + add + '</div><div class="kpis">' + chips + '</div>' + other + empty + '<div class="board">' + column + '</div>';
+    var active = BOARD_GROUPS.filter(function (group) { return group.id === filter; })[0];
+    var shown = cache.vas.filter(function (va) { return inBoardGroup(va, filter); });
+    var column = '<section class="col" id="board-list"><h3>' + esc(active.label) + ' <i class="b">' + shown.length + '</i></h3>'
+      + (shown.length ? shown.map(card).join('') : '<p class="mu sm">No one in this group</p>') + '</section>';
+    return '<div class="boardhead"><div><h1>Onboarding Board</h1><p class="lead">Open a card to see that VA.</p></div>' + add + '</div><div class="kpis" id="board-counts">' + chips + '</div>' + empty + '<div class="board">' + column + '</div>';
   }
 
-  function kpi(label, value) {
-    return '<div class="kpi"><b>' + esc(value) + '</b><span>' + esc(label) + '</span></div>';
+  function kpiButton(id, label, value, selected) {
+    return '<button type="button" class="kpi' + (selected ? ' on' : '') + '" data-action="board-filter" data-filter="' + esc(id) + '" aria-pressed="' + (selected ? 'true' : 'false') + '"><b>' + esc(value) + '</b><span>' + esc(label) + '</span></button>';
+  }
+
+  function kpiLink(href, label, value) {
+    return '<a class="kpi" href="' + href + '"><b>' + esc(value) + '</b><span>' + esc(label) + '</span></a>';
   }
 
   function card(va) {
     var sub = [va.clientName, va.businessName].filter(Boolean).join(' · ');
-    return '<a class="pc" href="#/vas/' + encodeURIComponent(va.id) + '"><b>' + esc(va.fullName) + '</b><div class="mu sm">' + esc(sub || 'No client yet') + '</div><div class="sm">' + esc(va.batchName || '') + '</div></a>';
+    return '<a class="pc" href="#/vas/' + encodeURIComponent(va.id) + '"><b>' + esc(va.fullName) + '</b><div class="mu sm">' + esc(sub || 'No client yet') + '</div><div class="sm">' + badge(va.status) + ' ' + esc(va.batchName || '') + '</div></a>';
   }
 
   function pickEval(va, week) {
@@ -971,6 +997,10 @@
     var name = action.dataset.action;
     var route = readRoute();
     try {
+      if (name === 'board-filter') {
+        state.boardFilter = action.dataset.filter || 'onboarding';
+        return render();
+      }
       if (name === 'add-menu') {
         var pop = document.getElementById('add-pop');
         if (pop) pop.hidden = !pop.hidden;

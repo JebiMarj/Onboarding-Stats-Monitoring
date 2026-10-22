@@ -140,7 +140,7 @@ The page follows the system light or dark setting. Dark mode / Light mode saves 
 
 The top bar holds Onboarding (Board, Batches). Search, the theme control, and the account menu sit on the right. Settings and sign out are in the account menu. A narrow window folds the menu into one menu button.
 
-The board shows On the roster and Onboarding. The + button adds one VA or imports a CSV. The template is a header row only. The import shows a preview and does not save until every row is valid. A board card opens the profile. VAs in another stage stay on the roster and open from search. Search is the control on the right of the bar, and the `/` key.
+The board counts are On the Roster, Number of Batches, Onboarding, Endorsed to Operations, and Resigned/Terminated. Onboarding includes Continue onboarding and Ready for endorsement. Resigned/Terminated includes Resigned and EOC. Each count filters the list under it. Number of Batches opens the Batches page. The list opens on Onboarding. The + button adds one VA or imports a CSV. The template is a header row only. The import shows a preview and does not save until every row is valid. A card opens the profile. Search is the control on the right of the bar, and the `/` key.
 
 The profile is a header plus eight cards: Attendance, QA score, WBR, Tool navigation, Critical thinking, Communication, Core values, and Feedback sessions. A card opens its inputs underneath. Weekly KPI, Close week, and Endorse stay below the cards. Status and movement history sit in the Status menu.
 
