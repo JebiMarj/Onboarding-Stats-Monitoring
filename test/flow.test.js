@@ -357,3 +357,207 @@ test('QA can be saved on a second open week and a new WBR date cannot repeat', (
     asNew: true, vaId: vaId, workDate: '2026-01-08', totalLeads: '', convertedLeads: ''
   }).error, 'Enter total leads or converted leads.');
 });
+
+test('QA stores the typed date range on the week that contains From', () => {
+  let state = fresh();
+  state = must(Model.createBatch(state, admin, { name: 'Batch F' })).state;
+  state = must(Model.createVa(state, admin, {
+    fullName: 'Gina Ramos',
+    onboardingStart: '2026-01-05',
+    batchId: state.batches[0].id
+  })).state;
+  const vaId = state.vas[0].id;
+  const before = state.evaluations.length;
+  assert.equal(Model.saveQaForWeek(state, admin, {
+    vaId: vaId,
+    asNew: true,
+    periodStart: '2026-01-20',
+    periodEnd: '2026-01-19',
+    score: 70
+  }).error, 'To is earlier than From.');
+  assert.equal(state.evaluations.length, before);
+
+  assert.equal(Model.saveQaForWeek(state, qa, {
+    vaId: vaId,
+    asNew: true,
+    periodStart: '2026-02-02',
+    score: 90
+  }).error, 'An onboarder needs to start this week before a QA score can be saved.');
+
+  state = must(Model.saveQaForWeek(state, admin, {
+    vaId: vaId,
+    asNew: true,
+    periodStart: '2026-01-07',
+    periodEnd: '2026-01-09',
+    score: 81,
+    formUrl: 'https://example.com/form',
+    recordingUrl: 'https://example.com/call'
+  })).state;
+  const firstWeek = state.evaluations.find((ev) => ev.weekStart === '2026-01-05');
+  assert.ok(firstWeek);
+  let first = state.qa.find((row) => row.evaluationId === firstWeek.id);
+  assert.equal(first.periodStart, '2026-01-07');
+  assert.equal(first.periodEnd, '2026-01-09');
+  assert.equal(first.score, 81);
+
+  state = must(Model.saveQaForWeek(state, admin, {
+    vaId: vaId,
+    asNew: true,
+    periodStart: '2026-01-21',
+    periodEnd: '',
+    score: 79
+  })).state;
+  const secondWeek = state.evaluations.find((ev) => ev.weekStart === '2026-01-19');
+  const second = state.qa.find((row) => row.evaluationId === secondWeek.id);
+  assert.equal(second.periodStart, '2026-01-21');
+  assert.equal(second.periodEnd, '');
+  assert.equal(Model.saveQaForWeek(state, admin, {
+    vaId: vaId,
+    asNew: true,
+    periodStart: '2026-01-22',
+    score: 70
+  }).error, 'A QA score already exists for the week of that From date.');
+
+  state = must(Model.saveQaForWeek(state, qa, {
+    vaId: vaId,
+    id: first.id,
+    periodStart: '2026-01-08',
+    periodEnd: '2026-01-10',
+    score: 88
+  })).state;
+  first = state.qa.find((row) => row.id === first.id);
+  assert.equal(first.score, 88);
+  assert.equal(first.periodStart, '2026-01-08');
+  assert.equal(first.evaluationId, firstWeek.id);
+
+  state = must(Model.saveQaForWeek(state, qa, {
+    vaId: vaId,
+    weekStart: '2026-01-05',
+    score: 86
+  })).state;
+  first = state.qa.find((row) => row.id === first.id);
+  assert.equal(first.score, 86);
+  assert.equal(first.periodStart, '2026-01-08');
+  assert.equal(first.periodEnd, '2026-01-10');
+
+  assert.equal(Model.saveQaForWeek(state, admin, {
+    vaId: vaId,
+    id: first.id,
+    periodStart: '2026-01-22',
+    score: 86
+  }).error, 'A QA score already exists for the week of that From date.');
+
+  const presented = Model.presentVa(state, vaId);
+  const listed = presented.evaluations.filter((ev) => ev.qa).sort((a, b) => {
+    return (a.qa.periodStart || a.weekStart) < (b.qa.periodStart || b.weekStart) ? 1 : -1;
+  });
+  assert.equal(listed[0].qa.periodStart, '2026-01-21');
+  assert.equal(listed[1].qa.periodStart, '2026-01-08');
+});
+
+test('dated competency entries keep the latest score and feedback can be edited', () => {
+  let state = fresh();
+  state = must(Model.createBatch(state, admin, { name: 'Batch G' })).state;
+  state = must(Model.createVa(state, admin, {
+    fullName: 'Hugo Tan',
+    onboardingStart: '2026-01-05',
+    batchId: state.batches[0].id
+  })).state;
+  const vaId = state.vas[0].id;
+  assert.equal(Model.saveCompetencyEntry(state, qa, {
+    vaId: vaId,
+    competency: 'toolNavigation',
+    entryDate: '2026-01-06',
+    score: 70
+  }).error, 'Your role cannot do that.');
+  assert.equal(Model.saveCompetencyEntry(state, onboarder, {
+    vaId: vaId,
+    competency: 'toolNavigation',
+    entryDate: '2026-01-06',
+    score: ''
+  }).error, 'Enter a score from 0 to 100.');
+
+  state = must(Model.saveCompetencyEntry(state, onboarder, {
+    vaId: vaId,
+    competency: 'toolNavigation',
+    entryDate: '2026-01-06',
+    score: 70,
+    comment: ''
+  })).state;
+  state = must(Model.saveCompetencyEntry(state, onboarder, {
+    vaId: vaId,
+    competency: 'toolNavigation',
+    entryDate: '2026-01-08',
+    score: 95,
+    comment: 'Knows the dialer.'
+  })).state;
+  const week = state.evaluations.find((ev) => ev.weekStart === '2026-01-05');
+  assert.ok(week);
+  const weekly = state.competencies.find((row) => row.evaluationId === week.id);
+  assert.equal(weekly.toolNavigation, 95);
+  assert.equal(weekly.toolNavigationComment, 'Knows the dialer.');
+  weekly.toolNavigation = 1;
+  assert.equal(Model.computeSnapshot(state, week.id).breakdown.find((row) => row.key === 'tool_navigation').score, 95);
+  const shown = Model.presentVa(state, vaId).competencyEntries;
+  assert.equal(shown[0].score, 95);
+  assert.equal(shown[0].entryDate, '2026-01-08');
+  assert.equal(shown[1].comment, '');
+
+  const sameDay = shown.filter((row) => row.entryDate === '2026-01-08' || row.entryDate === '2026-01-06');
+  sameDay[0].entryDate = '2026-01-08';
+  sameDay[1].entryDate = '2026-01-08';
+  const low = state.competencyEntries.find((row) => row.score === 70);
+  const high = state.competencyEntries.find((row) => row.score === 95);
+  low.updatedAt = '2026-01-08T00:00:00.000Z';
+  high.updatedAt = '2026-01-08T01:00:00.000Z';
+  assert.equal(Model.presentVa(state, vaId).competencyEntries[0].score, 95);
+
+  const latestId = high.id;
+  state = must(Model.deleteCompetencyEntry(state, onboarder, { id: latestId })).state;
+  assert.equal(state.competencies.find((row) => row.evaluationId === week.id).toolNavigation, 70);
+  assert.equal(Model.computeSnapshot(state, week.id).breakdown.find((row) => row.key === 'tool_navigation').score, 70);
+  const remaining = state.competencyEntries[0].id;
+  state = must(Model.deleteCompetencyEntry(state, onboarder, { id: remaining })).state;
+  assert.equal(state.competencies.find((row) => row.evaluationId === week.id).toolNavigation, null);
+  state = must(Model.saveCompetencies(state, onboarder, {
+    evaluationId: week.id,
+    toolNavigation: 80,
+    toolNavigationComment: 'Weekly note.'
+  })).state;
+  assert.equal(Model.computeSnapshot(state, week.id).breakdown.find((row) => row.key === 'tool_navigation').score, 80);
+
+  state = must(Model.saveQa(state, qa, { evaluationId: week.id, score: 90 })).state;
+  state = must(Model.closeEvaluation(state, onboarder, { evaluationId: week.id, gaps: '', coachingActions: '' })).state;
+  assert.equal(Model.saveCompetencyEntry(state, onboarder, {
+    vaId: vaId,
+    competency: 'communication',
+    entryDate: '2026-01-07',
+    score: 60
+  }).error, 'That day is in a closed week.');
+  assert.equal(Model.saveQaForWeek(state, qa, {
+    vaId: vaId,
+    id: state.qa[0].id,
+    periodStart: '2026-01-08',
+    score: 91
+  }).error, 'This week is closed and its scores cannot be changed.');
+
+  state = must(Model.addCoaching(state, onboarder, {
+    vaId: vaId,
+    sessionDate: '2026-01-15',
+    topic: 'Opening',
+    discussion: 'Skipped the client name.',
+    action: 'Use the script.'
+  })).state;
+  const sessionId = state.coaching[0].id;
+  state = must(Model.addCoaching(state, onboarder, {
+    id: sessionId,
+    vaId: vaId,
+    sessionDate: '2026-01-16',
+    topic: 'Follow-up',
+    discussion: 'The script landed.',
+    action: 'Keep it.'
+  })).state;
+  assert.equal(state.coaching.length, 1);
+  assert.equal(state.coaching[0].topic, 'Follow-up');
+  assert.equal(state.coaching[0].sessionDate, '2026-01-16');
+});

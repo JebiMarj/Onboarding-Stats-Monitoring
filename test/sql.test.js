@@ -453,6 +453,56 @@ test('Postgres formula matches the JavaScript formula and RLS enforces roles', {
     /row-level security|permission denied/i
   );
 
+  await asUser(db, qa, () => db.query(
+    `update public.weekly_qa set period_start = '2026-11-11', period_end = '2026-11-13' where evaluation_id = $1`,
+    [extraB.rows[0].id]
+  ));
+  const period = await db.query(
+    `select period_start::text as period_start, period_end::text as period_end
+     from public.weekly_qa where evaluation_id = $1`,
+    [extraB.rows[0].id]
+  );
+  assert.equal(period.rows[0].period_start, '2026-11-11');
+  assert.equal(period.rows[0].period_end, '2026-11-13');
+  await expectThrow(
+    asUser(db, qa, () => db.query(
+      `update public.weekly_qa set period_end = '2026-11-01' where evaluation_id = $1`,
+      [extraB.rows[0].id]
+    )),
+    /weekly_qa_period_order|check constraint/i
+  );
+  await expectThrow(
+    asUser(db, qa, () => db.query(
+      `insert into public.competency_entries (va_id, competency, entry_date, score)
+       values ($1, 'tool_navigation', '2026-11-02', 90)`,
+      [va.id]
+    )),
+    /row-level security|permission denied/i
+  );
+  await asUser(db, onboarder, () => db.query(
+    `insert into public.competency_entries (va_id, competency, entry_date, score, comment)
+     values ($1, 'tool_navigation', '2026-11-02', 91, 'Second pass')`,
+    [va.id]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `insert into public.competency_entries (va_id, competency, entry_date, score)
+     values ($1, 'tool_navigation', '2026-11-02', 77)`,
+    [va.id]
+  ));
+  const entryCount = await db.query(
+    `select count(*)::int as n from public.competency_entries where va_id = $1`,
+    [va.id]
+  );
+  assert.equal(entryCount.rows[0].n, 2);
+  await expectThrow(
+    asUser(db, onboarder, () => db.query(
+      `insert into public.competency_entries (va_id, competency, entry_date, score)
+       values ($1, 'communication', '2026-10-14', 50)`,
+      [va.id]
+    )),
+    /closed week/i
+  );
+
   await expectThrow(
     db.exec(fs.readFileSync(path.join(root, 'supabase/reset_old_schema.sql'), 'utf8')),
     /Backup first/
