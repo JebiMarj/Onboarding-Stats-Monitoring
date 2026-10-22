@@ -1,20 +1,50 @@
-// Sidebar shell from the pre-rebuild app, wired to the current store.
+// Top navigation for the restored palette, wired to the current store.
 (function () {
-  var NAV = [
-    ['G', 'Training'],
-    ['bat', 'Batches', '#/batches'],
-    ['tr', 'Training Results', '#/training'],
-    ['trep', 'Training Reports', '#/reports-training'],
-    ['G', 'VA Performance'],
-    ['dash', 'Onboarding Board', '#/board'],
-    ['va', 'VA Directory', '#/vas'],
-    ['perf', 'Performance Log', '#/attendance'],
-    ['coach', 'Feedback Sessions', '#/coaching'],
-    ['rep', 'Reports', '#/reports'],
-    ['G', 'QA Monitoring'],
-    ['qa', 'QA Sheet', '#/qa'],
-    ['set', 'Settings', '#/settings']
+  var MENUS = [
+    {
+      id: 'onboarding',
+      label: 'Onboarding',
+      icon: 'board',
+      items: [
+        ['dash', 'Board', '#/board'],
+        ['va', 'VA Directory', '#/vas'],
+        ['bat', 'Batches', '#/batches']
+      ]
+    },
+    {
+      id: 'performance',
+      label: 'Performance',
+      icon: 'pulse',
+      items: [
+        ['perf', 'Performance log', '#/attendance'],
+        ['coach', 'Feedback sessions', '#/coaching'],
+        ['qa', 'QA sheet', '#/qa']
+      ]
+    },
+    {
+      id: 'training',
+      label: 'Training',
+      icon: 'book',
+      items: [
+        ['tr', 'Results', '#/training'],
+        ['trep', 'Reports', '#/reports-training']
+      ]
+    }
   ];
+  var ICONS = {
+    board: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    pulse: '<path d="M3 12h4l2.2-6 3.6 12L15 12h6"/>',
+    book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+    chart: '<path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-3"/>',
+    search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.2-3.2"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6"/>',
+    moon: '<path d="M20 14.8A8.2 8.2 0 1 1 9.2 4 6.4 6.4 0 0 0 20 14.8z"/>',
+    caret: '<path d="m6 9 6 6 6-6"/>',
+    menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+    close: '<path d="M6 6l12 12M18 6 6 18"/>',
+    collapse: '<path d="M5 8h14M5 12h14M8 16h8"/>',
+    expand: '<path d="M5 7h14M5 12h14M5 17h14"/>'
+  };
   var TABS = [
     ['overview', 'Overview'],
     ['attendance', 'Daily Performance'],
@@ -126,6 +156,10 @@
     else location.hash = hash;
   }
 
+  function icon(name, cls) {
+    return '<svg class="' + (cls || '') + '" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
+  }
+
   function setTheme(theme) {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
@@ -134,30 +168,146 @@
       localStorage.setItem('cnr-theme', theme);
     } catch (err) { /* private mode */ }
     var btn = document.getElementById('theme-btn');
-    if (btn) btn.textContent = theme === 'dark' ? 'Light mode' : 'Dark mode';
+    if (!btn) return;
+    var dark = theme === 'dark';
+    btn.innerHTML = dark ? icon('sun') : icon('moon');
+    btn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
+    btn.title = btn.getAttribute('aria-label');
+  }
+
+  function storedNavMode() {
+    try { return localStorage.getItem('cnr-nav') === 'compact' ? 'compact' : 'full'; }
+    catch (err) { return 'full'; }
+  }
+
+  function applyNavMode(mode) {
+    var nav = document.getElementById('nav');
+    if (!nav) return;
+    var compact = mode === 'compact';
+    nav.dataset.compact = compact ? '1' : '0';
+    var btn = document.getElementById('nav-compact');
+    if (btn) {
+      btn.setAttribute('aria-pressed', compact ? 'true' : 'false');
+      btn.setAttribute('aria-label', compact ? 'Expand navigation' : 'Minimize navigation');
+      btn.title = btn.getAttribute('aria-label');
+      btn.innerHTML = compact ? icon('expand') : icon('collapse');
+    }
+    try { localStorage.setItem('cnr-nav', compact ? 'compact' : 'full'); }
+    catch (err) { /* private mode */ }
+  }
+
+  function menuHtml(menu) {
+    var items = menu.items.map(function (item) {
+      return '<a href="' + item[2] + '" data-nav="' + item[0] + '">' + esc(item[1]) + '</a>';
+    }).join('');
+    return '<div class="menu" data-menu="' + menu.id + '"><button type="button" class="nav-btn" data-menu-btn="' + menu.id + '" aria-haspopup="true" aria-expanded="false">'
+      + icon(menu.icon) + '<span class="nav-label">' + esc(menu.label) + '</span>' + icon('caret', 'caret')
+      + '</button><div class="menu-panel" role="menu">' + items + '</div></div>';
   }
 
   function shell(user) {
-    var links = NAV.map(function (item) {
-      if (item[0] === 'G') return '<div class="nl">' + esc(item[1]) + '</div>';
-      return '<a href="' + item[2] + '" data-nav="' + item[0] + '">' + esc(item[1]) + '</a>';
-    }).join('');
-    var preview = CNRStore.mode() === 'mock' ? '<span class="mu sm">Preview</span>' : '';
+    var preview = CNRStore.mode() === 'mock' ? '<p class="menu-note">Preview in this browser</p>' : '';
     return ''
-      + '<aside id="side"><div class="brand"><img src="logo.png" alt=""><div>Create &amp; Reach<small>Onboarding QA</small></div></div>'
-      + links
-      + '<div class="usr"><span class="av s">' + esc(initials(user.name)) + '</span><b>' + esc(user.name) + '</b>'
-      + '<button type="button" class="g s" id="sign-out">Sign out</button></div></aside>'
-      + '<div id="main"><div id="top"><button type="button" class="sbtn" id="open-pal">Search VAs... <kbd>/</kbd></button>'
-      + '<span class="sp"></span>' + preview + '<span class="b" id="signed-role">' + esc(CNRLabels.roleLabel(user.role)) + '</span>'
-      + '<button type="button" class="g" id="theme-btn">Theme</button></div><div id="page"></div></div>';
+      + '<header id="nav" data-compact="0"><a class="brand" href="#/board"><img src="logo.png" alt="">'
+      + '<span class="brand-name">Create &amp; Reach<small>Onboarding QA</small></span></a>'
+      + '<nav class="nav-links" aria-label="Main">' + MENUS.map(menuHtml).join('')
+      + '<a class="nav-btn" href="#/reports" data-nav="rep">' + icon('chart') + '<span class="nav-label">Reports</span></a></nav>'
+      + '<div class="nav-tools"><button type="button" class="sbtn" id="open-pal" aria-label="Search VAs">' + icon('search')
+      + '<span class="nav-label">Search</span><kbd>/</kbd></button>'
+      + '<button type="button" class="icon-btn" id="theme-btn" aria-label="Switch to dark mode"></button>'
+      + '<div class="menu user" data-menu="user"><button type="button" class="nav-btn" id="user-menu" data-menu-btn="user" aria-haspopup="true" aria-expanded="false">'
+      + '<span class="av s">' + esc(initials(user.name)) + '</span><span class="user-meta"><span class="user-name">' + esc(user.name) + '</span>'
+      + '<span class="b" id="signed-role">' + esc(CNRLabels.roleLabel(user.role)) + '</span></span></button>'
+      + '<div class="menu-panel" role="menu"><div class="menu-who"><b>' + esc(user.name) + '</b><span>' + esc(user.email || '') + '</span></div>'
+      + preview + '<a href="#/settings" data-nav="set">Settings</a><button type="button" class="menu-item" id="sign-out">Sign out</button></div></div>'
+      + '<button type="button" class="icon-btn" id="nav-compact" aria-pressed="false" aria-label="Minimize navigation"></button>'
+      + '<button type="button" class="icon-btn" id="nav-burger" aria-expanded="false" aria-label="Open menu">' + icon('menu') + '</button>'
+      + '</div></header><div id="main"><div id="page"></div></div>';
+  }
+
+  function closeMenus() {
+    document.querySelectorAll('#nav .menu.open').forEach(function (menu) {
+      menu.classList.remove('open');
+      var btn = menu.querySelector('[data-menu-btn]');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function closeDrawer() {
+    var nav = document.getElementById('nav');
+    var burger = document.getElementById('nav-burger');
+    if (nav) nav.classList.remove('open');
+    if (burger) {
+      burger.setAttribute('aria-expanded', 'false');
+      burger.setAttribute('aria-label', 'Open menu');
+      burger.innerHTML = icon('menu');
+    }
+  }
+
+  function toggleMenu(id) {
+    var menu = document.querySelector('#nav .menu[data-menu="' + id + '"]');
+    if (!menu) return;
+    var willOpen = !menu.classList.contains('open');
+    closeMenus();
+    if (!willOpen) return;
+    menu.classList.add('open');
+    var btn = menu.querySelector('[data-menu-btn]');
+    if (btn) btn.setAttribute('aria-expanded', 'true');
+  }
+
+  function onNavClick(event) {
+    if (event.target.closest('#nav-compact')) {
+      var nav = document.getElementById('nav');
+      applyNavMode(nav && nav.dataset.compact === '1' ? 'full' : 'compact');
+      return;
+    }
+    var burger = event.target.closest('#nav-burger');
+    if (burger) {
+      var bar = document.getElementById('nav');
+      var open = bar.classList.toggle('open');
+      burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      burger.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+      burger.innerHTML = open ? icon('close') : icon('menu');
+      return;
+    }
+    var menuBtn = event.target.closest('[data-menu-btn]');
+    if (menuBtn) {
+      var drawer = menuBtn.closest('.nav-links') && document.getElementById('nav').classList.contains('open');
+      if (!drawer) toggleMenu(menuBtn.getAttribute('data-menu-btn'));
+      return;
+    }
+    if (event.target.closest('#theme-btn')) {
+      setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+      return;
+    }
+    if (event.target.closest('#open-pal')) {
+      closeMenus();
+      openPalette();
+      return;
+    }
+    if (event.target.closest('#sign-out')) {
+      CNRStore.signOut().then(showLogin);
+      return;
+    }
+    if (event.target.closest('a[href^="#"]')) {
+      closeMenus();
+      closeDrawer();
+    }
   }
 
   function markNav(route) {
     var active = { dash: 'dash', va: 'va', prof: 'va', perf: 'perf', coach: 'coach', rep: 'rep', bat: 'bat', tr: 'tr', trep: 'trep', qa: 'qa', set: 'set' }[route.key];
-    document.querySelectorAll('#side a').forEach(function (link) {
-      link.classList.toggle('on', link.dataset.nav === active);
+    document.querySelectorAll('#nav a[data-nav]').forEach(function (link) {
+      var on = link.dataset.nav === active;
+      link.classList.toggle('on', on);
+      if (on) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
     });
+    document.querySelectorAll('#nav .menu').forEach(function (menu) {
+      menu.classList.toggle('on', !!menu.querySelector('a[data-nav].on'));
+    });
+    closeMenus();
+    closeDrawer();
   }
 
   function showLogin(message) {
@@ -201,14 +351,8 @@
     var app = document.getElementById('app');
     app.hidden = false;
     app.innerHTML = shell(me());
-    document.getElementById('sign-out').addEventListener('click', async function () {
-      await CNRStore.signOut();
-      showLogin();
-    });
-    document.getElementById('theme-btn').addEventListener('click', function () {
-      setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
-    });
-    document.getElementById('open-pal').addEventListener('click', openPalette);
+    applyNavMode(storedNavMode());
+    document.getElementById('nav').addEventListener('click', onNavClick);
     setTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
     var page = document.getElementById('page');
     page.addEventListener('click', onClick);
@@ -235,9 +379,17 @@
           openPalette();
         }
         if (event.key === 'Escape') {
+          closeMenus();
+          closeDrawer();
           closeModal();
           closePalette();
         }
+      });
+      document.addEventListener('click', function (event) {
+        var nav = document.getElementById('nav');
+        if (!nav || nav.contains(event.target)) return;
+        closeMenus();
+        closeDrawer();
       });
       document.getElementById('mod').addEventListener('click', function (event) {
         if (event.target.id === 'mod' || (event.target.closest && event.target.closest('[data-action="cancel-modal"]'))) closeModal();

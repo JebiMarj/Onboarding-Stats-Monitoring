@@ -2,7 +2,7 @@
 
 Static site for weekly onboarding QA. There is no build step. Supabase provides Postgres and email/password sign-in. Row Level Security enforces roles.
 
-The screen is the earlier sidebar app: dark navigation, Onboarding Board, VA Directory, and a profile with the onboarding steps. Weekly attendance by minutes, competency comments, coaching actions, the KPI, and endorsement use that layout. The database underneath is the current schema.
+The screen uses the earlier rose and stone palette, with a top navigation bar across the page. Weekly attendance by minutes, competency comments, coaching actions, the KPI, and endorsement use that layout. The database underneath is the current schema.
 
 The hosted project already has that schema, with one admin profile and no VA rows. Do not run the reset again, and do not import old VA records. This repository does not add a migration. The SQL steps below are only for a brand-new database.
 
@@ -134,10 +134,12 @@ That covers attendance minute math, a full-day absence, the weekly average, conv
 
 ## Theme
 
-The page follows the system light or dark setting. Dark mode / Light mode saves the choice in this browser under `cnr_theme` and `cnr-theme`.
+The page follows the system light or dark setting. Dark mode / Light mode saves the choice in this browser under `cnr_theme` and `cnr-theme`. The navigation bar can collapse to icons. That choice is saved under `cnr-nav`.
 
 ## Screens
 
-Training: Batches, Training Results, Training Reports. VA Performance: Onboarding Board, VA Directory, the profile (overview, daily attendance, QA, WBR, competencies, feedback sessions, weekly KPI, movement history), Performance Log, Feedback Sessions, Reports. QA Monitoring: QA Sheet and Settings.
+The top bar holds Onboarding (Board, VA Directory, Batches), Performance (Performance log, Feedback sessions, QA sheet), Training (Results, Reports), and Reports. Search, the theme control, and the account menu sit on the right. Settings and sign out are in the account menu. A narrow window folds the menus into one menu button.
 
-The board columns are Onboarding, Continue onboarding, Ready for endorsement, and Endorsed. Resigned and EOC sit under the board. A card opens the profile. Status changes that the database reserves — closing a week, and Endorse — stay on those actions. The directory starts empty. Search is the field at the top of the window, and the `/` key.
+The profile steps are overview, daily attendance, QA, WBR, competencies, feedback sessions, weekly KPI, and movement history.
+
+The board columns are Onboarding, Continue onboarding, Ready for endorsement, and Endorsed. Resigned and EOC sit under the board. A card opens the profile. Status changes that the database reserves — closing a week, and Endorse — stay on those actions. The directory starts empty. Search is the control on the right of the bar, and the `/` key.
