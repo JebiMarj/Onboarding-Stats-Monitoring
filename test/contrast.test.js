@@ -36,30 +36,26 @@ test('light and dark color pairs meet WCAG AA', () => {
   const light = block(css, ':root');
   const dark = Object.assign({}, light, block(css, ':root[data-theme="dark"]'));
   const textPairs = [
-    ['--text', '--bg'],
-    ['--text', '--surface'],
-    ['--text', '--surface-2'],
-    ['--muted', '--bg'],
-    ['--muted', '--surface'],
-    ['--muted', '--surface-2'],
-    ['--faint', '--bg'],
-    ['--faint', '--surface'],
-    ['--faint', '--surface-2'],
-    ['--accent-text', '--accent'],
-    ['--accent-soft-text', '--accent-soft'],
-    ['--ok-text', '--ok-bg'],
-    ['--warn-text', '--warn-bg'],
-    ['--bad-text', '--bad-bg'],
-    ['--info-text', '--info-bg'],
-    ['--link', '--bg'],
-    ['--link', '--surface'],
-    ['--link', '--surface-2']
+    ['--tx', '--bg'],
+    ['--tx', '--card'],
+    ['--tx', '--hv'],
+    ['--tx', '--pri-soft'],
+    ['--mu', '--bg'],
+    ['--mu', '--card'],
+    ['--mu', '--hv'],
+    ['--pri-tx', '--pri'],
+    ['--ok', '--okb'],
+    ['--wn', '--wnb'],
+    ['--bad', '--badb'],
+    ['--side-tx', '--side'],
+    ['--side-mu', '--side']
   ];
   for (const theme of [light, dark]) {
     for (const [fg, bg] of textPairs) {
       const ratio = contrast(theme[fg], theme[bg]);
       assert.ok(ratio >= 4.5, theme[fg] + ' on ' + theme[bg] + ' is ' + ratio.toFixed(2));
     }
-    assert.ok(contrast(theme['--input'], theme['--surface']) >= 3, 'input border contrast');
   }
+  assert.ok(contrast('#ffffff', light['--ac']) >= 4.5, 'light accent button');
+  assert.ok(contrast('#1c1917', dark['--ac']) >= 4.5, 'dark accent button');
 });

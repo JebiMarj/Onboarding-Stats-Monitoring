@@ -529,5 +529,138 @@
     return Number(value);
   }
 
+  function vaBrief(row) {
+    var va = one(row);
+    if (!va) return { vaName: '', clientName: '', businessName: '', vaStatus: '', batchId: '', batchName: '' };
+    var batch = one(va.batches);
+    return {
+      vaName: va.full_name || '',
+      clientName: va.client_name || '',
+      businessName: va.business_name || '',
+      vaStatus: va.status || '',
+      batchId: va.batch_id || '',
+      batchName: batch ? batch.name : ''
+    };
+  }
+
+  api.listAttendance = async function () {
+    if (mock) {
+      var names = {};
+      state.vas.forEach(function (va) { names[va.id] = va.fullName; });
+      return state.attendance.map(function (row) {
+        return {
+          id: row.id,
+          vaId: row.vaId,
+          vaName: names[row.vaId] || '',
+          workDate: row.workDate,
+          absent: !!row.absent,
+          lateMinutes: row.lateMinutes,
+          downtimeMinutes: row.downtimeMinutes
+        };
+      }).sort(function (a, b) { return a.workDate < b.workDate ? 1 : a.workDate > b.workDate ? -1 : 0; });
+    }
+    var res = await sb().from('attendance_days').select('id, va_id, work_date, absent, late_minutes, downtime_minutes, va_profiles(full_name)').order('work_date', { ascending: false });
+    if (res.error) raise(res.error);
+    return (res.data || []).map(function (row) {
+      var va = one(row.va_profiles);
+      return {
+        id: row.id,
+        vaId: row.va_id,
+        vaName: va ? va.full_name : '',
+        workDate: row.work_date,
+        absent: !!row.absent,
+        lateMinutes: row.late_minutes,
+        downtimeMinutes: row.downtime_minutes
+      };
+    });
+  };
+
+  api.listCoaching = async function () {
+    if (mock) {
+      var names = {};
+      state.vas.forEach(function (va) { names[va.id] = va.fullName; });
+      return state.coaching.map(function (row) {
+        return {
+          id: row.id,
+          vaId: row.vaId,
+          vaName: names[row.vaId] || '',
+          sessionDate: row.sessionDate,
+          topic: row.topic,
+          discussion: row.discussion,
+          action: row.action,
+          createdAt: row.createdAt
+        };
+      }).sort(function (a, b) { return (a.sessionDate + a.createdAt) < (b.sessionDate + b.createdAt) ? 1 : -1; });
+    }
+    var res = await sb().from('coaching_sessions').select('id, va_id, session_date, topic, discussion, action, created_at, va_profiles(full_name)').order('session_date', { ascending: false });
+    if (res.error) raise(res.error);
+    return (res.data || []).map(function (row) {
+      var va = one(row.va_profiles);
+      return {
+        id: row.id,
+        vaId: row.va_id,
+        vaName: va ? va.full_name : '',
+        sessionDate: row.session_date,
+        topic: row.topic,
+        discussion: row.discussion,
+        action: row.action,
+        createdAt: row.created_at
+      };
+    });
+  };
+
+  api.listEvaluations = async function () {
+    if (mock) {
+      var byVa = {};
+      state.vas.forEach(function (va) {
+        byVa[va.id] = root.CNRModel.presentVa(state, va.id);
+      });
+      return state.evaluations.map(function (ev) {
+        var presented = byVa[ev.vaId];
+        var full = presented ? presented.evaluations.find(function (row) { return row.id === ev.id; }) : null;
+        var batch = presented ? state.batches.find(function (row) { return row.id === presented.batchId; }) : null;
+        return {
+          id: ev.id,
+          vaId: ev.vaId,
+          vaName: presented ? presented.fullName : '',
+          clientName: presented ? presented.clientName : '',
+          businessName: presented ? presented.businessName : '',
+          vaStatus: presented ? presented.status : '',
+          batchId: presented ? presented.batchId : '',
+          batchName: batch ? batch.name : (presented ? presented.batchName : ''),
+          weekStart: ev.weekStart,
+          status: ev.status,
+          outcome: ev.outcome || '',
+          overall: full && full.score ? full.score.overall : null,
+          passed: full && full.score ? full.score.passed : null,
+          qaScore: full && full.qa ? full.qa.score : null
+        };
+      }).sort(function (a, b) { return a.weekStart < b.weekStart ? 1 : a.weekStart > b.weekStart ? -1 : 0; });
+    }
+    var res = await sb().from('weekly_evaluations').select('id, va_id, week_start, status, outcome, score_snapshot, weekly_qa(score), va_profiles(full_name, client_name, business_name, status, batch_id, batches(name))').order('week_start', { ascending: false });
+    if (res.error) raise(res.error);
+    return (res.data || []).map(function (row) {
+      var brief = vaBrief(row.va_profiles);
+      var snap = row.score_snapshot || null;
+      var qa = one(row.weekly_qa);
+      return {
+        id: row.id,
+        vaId: row.va_id,
+        vaName: brief.vaName,
+        clientName: brief.clientName,
+        businessName: brief.businessName,
+        vaStatus: brief.vaStatus,
+        batchId: brief.batchId,
+        batchName: brief.batchName,
+        weekStart: row.week_start,
+        status: row.status,
+        outcome: row.outcome || '',
+        overall: snap && snap.overall != null ? Number(snap.overall) : null,
+        passed: snap ? snap.passed : null,
+        qaScore: qa ? num(qa.score) : null
+      };
+    });
+  };
+
   root.CNRStore = api;
 })(typeof globalThis !== 'undefined' ? globalThis : this);

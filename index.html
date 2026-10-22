@@ -4,12 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Create &amp; Reach — Onboarding QA</title>
-  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="logo.png" type="image/png">
   <link rel="stylesheet" href="app.css">
   <script>
     (function () {
       try {
-        var saved = localStorage.getItem('cnr-theme');
+        var saved = localStorage.getItem('cnr_theme') || localStorage.getItem('cnr-theme');
         var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
         var theme = dark ? 'dark' : 'light';
         document.documentElement.dataset.theme = theme;
@@ -19,9 +19,10 @@
   </script>
 </head>
 <body>
-  <div id="app">
-    <main class="wrap"><h1>Loading</h1></main>
-  </div>
+  <div id="app" hidden></div>
+  <div id="login" hidden></div>
+  <div id="mod" class="ov"></div>
+  <div id="pal" class="ov"></div>
   <noscript><p>This app needs JavaScript.</p></noscript>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
   <script src="config.js"></script>
