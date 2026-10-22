@@ -380,7 +380,7 @@ details.dx > div { padding: 0 2px 16px; }
 #login .go { width: 100%; margin-top: 18px; padding: 12px; }
 #le { color: var(--bad); min-height: 20px; margin-top: 10px; font-weight: 600; }
 
-.board { display: grid; grid-template-columns: repeat(4, minmax(220px, 1fr)); gap: 14px; overflow-x: auto; margin-bottom: 20px; }
+.board { display: grid; grid-template-columns: minmax(220px, 360px); gap: 14px; margin-bottom: 20px; }
 .col { background: transparent; border-radius: var(--radius); padding: 4px; min-height: 180px; border: 1px dashed transparent; }
 .col.over { border-color: var(--pri); }
 .col h3 { font-size: 13px; font-weight: 600; margin: 0 4px 12px; display: flex; gap: 8px; align-items: center; color: var(--mu); }
@@ -511,7 +511,7 @@ a.btn:hover { background: var(--hv); }
   #login .l { display: none; }
   #page { padding: 20px 16px 40px; }
   .split { grid-template-columns: 1fr; }
-  .board { grid-template-columns: repeat(4, 240px); }
+  .board { grid-template-columns: minmax(220px, 1fr); }
   .sheetnav { flex-wrap: wrap; }
   .weekpick { width: 100%; }
 }

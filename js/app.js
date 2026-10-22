@@ -9,32 +9,10 @@
         ['dash', 'Board', '#/board'],
         ['bat', 'Batches', '#/batches']
       ]
-    },
-    {
-      id: 'performance',
-      label: 'Performance',
-      icon: 'pulse',
-      items: [
-        ['perf', 'Performance log', '#/attendance'],
-        ['coach', 'Feedback sessions', '#/coaching'],
-        ['qa', 'QA sheet', '#/qa']
-      ]
-    },
-    {
-      id: 'training',
-      label: 'Training',
-      icon: 'book',
-      items: [
-        ['tr', 'Results', '#/training'],
-        ['trep', 'Reports', '#/reports-training']
-      ]
     }
   ];
   var ICONS = {
     board: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
-    pulse: '<path d="M3 12h4l2.2-6 3.6 12L15 12h6"/>',
-    book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
-    chart: '<path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16v-5"/><path d="M12 16V8"/><path d="M16 16v-3"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.2-3.2"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6"/>',
     moon: '<path d="M20 14.8A8.2 8.2 0 1 1 9.2 4 6.4 6.4 0 0 0 20 14.8z"/>',
@@ -69,7 +47,6 @@
     history: 'history'
   };
   var CSV_HEADERS = ['full_name', 'onboarding_start', 'onboarder_name', 'client_name', 'business_name', 'schedule', 'status', 'batch', 'sop_or_portfolio'];
-  var COLS = ['Onboarding', 'Continue onboarding', 'Ready for endorsement', 'Endorsed'];
   var COMPS = [
     ['toolNavigation', 'toolNavigationComment', 'Tool navigation'],
     ['communication', 'communicationComment', 'Communication'],
@@ -141,10 +118,8 @@
     var path = (q === -1 ? raw : raw.slice(0, q)).replace(/^#\/?/, '');
     var params = new URLSearchParams(q === -1 ? '' : raw.slice(q + 1));
     var segs = path.split('/').filter(Boolean);
-    var routes = {
-      board: 'dash', vas: 'va', attendance: 'perf', coaching: 'coach', reports: 'rep',
-      batches: 'bat', training: 'tr', 'reports-training': 'trep', qa: 'qa', settings: 'set'
-    };
+    var routes = { board: 'dash', batches: 'bat', settings: 'set' };
+    var retired = { attendance: 1, coaching: 1, reports: 1, training: 1, 'reports-training': 1, qa: 1 };
     if (segs[0] === 'vas' && segs[1]) {
       var focus = params.get('focus') || LEGACY_FOCUS[params.get('tab') || ''] || '';
       return {
@@ -154,7 +129,7 @@
         week: params.get('week') || ''
       };
     }
-    if (segs[0] === 'vas') return { key: 'board-redirect', vaId: '', focus: '', week: '' };
+    if (segs[0] === 'vas' || retired[segs[0]]) return { key: 'board-redirect', vaId: '', focus: '', week: '' };
     return { key: routes[segs[0]] || 'dash', vaId: '', focus: '', week: '' };
   }
 
@@ -229,8 +204,7 @@
     return ''
       + '<header id="nav" data-compact="0"><a class="brand" href="#/board"><img src="logo.png" alt="">'
       + '<span class="brand-name">Create &amp; Reach<small>Onboarding QA</small></span></a>'
-      + '<nav class="nav-links" aria-label="Main">' + MENUS.map(menuHtml).join('')
-      + '<a class="nav-btn" href="#/reports" data-nav="rep">' + icon('chart') + '<span class="nav-label">Reports</span></a></nav>'
+      + '<nav class="nav-links" aria-label="Main">' + MENUS.map(menuHtml).join('') + '</nav>'
       + '<div class="nav-tools"><button type="button" class="sbtn" id="open-pal" aria-label="Search VAs">' + icon('search')
       + '<span class="nav-label">Search</span><kbd>/</kbd></button>'
       + '<button type="button" class="icon-btn" id="theme-btn" aria-label="Switch to dark mode"></button>'
@@ -315,7 +289,7 @@
   }
 
   function markNav(route) {
-    var active = { dash: 'dash', prof: 'dash', perf: 'perf', coach: 'coach', rep: 'rep', bat: 'bat', tr: 'tr', trep: 'trep', qa: 'qa', set: 'set' }[route.key];
+    var active = { dash: 'dash', prof: 'dash', bat: 'bat', set: 'set' }[route.key];
     document.querySelectorAll('#nav a[data-nav]').forEach(function (link) {
       var on = link.dataset.nav === active;
       link.classList.toggle('on', on);
@@ -456,12 +430,7 @@
       var html = '';
       if (route.key === 'dash') html = viewBoard();
       else if (route.key === 'prof') html = await viewProfile(route);
-      else if (route.key === 'perf') html = await viewAttendance();
-      else if (route.key === 'coach') html = await viewCoaching();
-      else if (route.key === 'rep') html = await viewReports();
       else if (route.key === 'bat') html = await viewBatches();
-      else if (route.key === 'tr' || route.key === 'trep') html = await viewTraining(route.key === 'trep');
-      else if (route.key === 'qa') html = await viewQa();
       else html = await viewSettings();
       if (seq !== renderSeq) return;
       page.innerHTML = banner() + html;
@@ -489,10 +458,7 @@
     cache.vas.forEach(function (va) { counts[va.status] = (counts[va.status] || 0) + 1; });
     var chips = ''
       + kpi('On the roster', counts.All)
-      + kpi('Onboarding', counts.Onboarding || 0)
-      + kpi('Continue onboarding', counts['Continue onboarding'] || 0)
-      + kpi('Ready for endorsement', counts['Ready for endorsement'] || 0)
-      + kpi('Endorsed', counts.Endorsed || 0);
+      + kpi('Onboarding', counts.Onboarding || 0);
     var add = '';
     if (can('manage_va')) {
       add = '<div class="addbox" id="addbox"><button type="button" class="plus" id="board-add" data-action="add-menu" aria-label="Add VAs" aria-haspopup="menu" aria-controls="add-pop">+</button>'
@@ -503,14 +469,14 @@
         + '</div></div>';
     }
     var empty = cache.vas.length ? '' : '<div class="card emptyqa"><h2>No VAs yet</h2><p>' + (can('manage_va') ? 'Use + to add one VA, or import a CSV. The board starts empty.' : 'The board starts empty.') + '</p></div>';
-    var cols = COLS.map(function (status) {
-      var cards = cache.vas.filter(function (va) { return va.status === status; }).map(card).join('');
-      return '<section class="col"><h3>' + esc(status) + ' <i class="b">' + (counts[status] || 0) + '</i></h3>'
-        + (cards || '<p class="mu sm">No one in this stage</p>') + '</section>';
-    }).join('');
-    var parked = cache.vas.filter(function (va) { return va.status === 'Resigned' || va.status === 'EOC'; });
-    var parkedHtml = '<h2>Resigned and EOC</h2>' + (parked.length ? '<div class="g3">' + parked.map(card).join('') + '</div>' : '<p class="mu">No one here.</p>');
-    return '<div class="boardhead"><div><h1>Onboarding Board</h1><p class="lead">Open a card to see that VA. Closing a week and Endorse update the stage.</p></div>' + add + '</div><div class="kpis">' + chips + '</div>' + empty + '<div class="board">' + cols + '</div>' + parkedHtml;
+    var onboarding = cache.vas.filter(function (va) { return va.status === 'Onboarding'; });
+    var elsewhere = cache.vas.length - onboarding.length;
+    var column = '<section class="col"><h3>Onboarding <i class="b">' + onboarding.length + '</i></h3>'
+      + (onboarding.length ? onboarding.map(card).join('') : '<p class="mu sm">No one in this stage</p>') + '</section>';
+    var other = elsewhere
+      ? '<p class="mu">' + elsewhere + (elsewhere === 1 ? ' VA is' : ' VAs are') + ' in another stage. Search opens their profiles.</p>'
+      : '';
+    return '<div class="boardhead"><div><h1>Onboarding Board</h1><p class="lead">Open a card to see that VA.</p></div>' + add + '</div><div class="kpis">' + chips + '</div>' + other + empty + '<div class="board">' + column + '</div>';
   }
 
   function kpi(label, value) {
@@ -811,38 +777,6 @@
     return '<div class="card tw"><h2>Movement history</h2><table><thead><tr><th>When</th><th>From</th><th>To</th><th>Note</th><th>By</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
-  async function viewAttendance() {
-    var rows = await CNRStore.listAttendance();
-    if (!rows.length) return '<h1>Performance Log</h1><p class="lead">Daily attendance for every VA.</p><div class="card"><p class="mu">No attendance yet.</p></div>';
-    var body = rows.map(function (row) {
-      var day = CNRScore.dailyAttendancePercent(row);
-      return '<tr class="cl" data-href="' + profileHash(row.vaId, 'attendance', '') + '"><td>' + esc(CNRDates.formatLong(row.workDate)) + '</td><td>' + esc(row.vaName) + '</td><td>' + (row.absent ? 'Yes' : 'No') + '</td><td>' + esc(row.lateMinutes) + '</td><td>' + esc(row.downtimeMinutes) + '</td><td>' + esc(row.remarks || '—') + '</td><td>' + esc(pct(day)) + '</td></tr>';
-    }).join('');
-    return '<h1>Performance Log</h1><p class="lead">One record per VA per work day. Eight hours is 100%.</p><div class="card tw"><table><thead><tr><th>Date</th><th>VA</th><th>Absent</th><th>Late min</th><th>Downtime</th><th>Remarks</th><th>Daily %</th></tr></thead><tbody>' + body + '</tbody></table></div>';
-  }
-
-  async function viewCoaching() {
-    var rows = await CNRStore.listCoaching();
-    if (!rows.length) return '<h1>Feedback Sessions</h1><p class="lead">Coaching history across the roster. Sessions are not part of the KPI.</p><div class="card"><p class="mu">No feedback sessions yet.</p></div>';
-    var body = rows.map(function (row) {
-      return '<tr class="cl" data-href="' + profileHash(row.vaId, 'feedback', '') + '"><td>' + esc(CNRDates.formatLong(row.sessionDate)) + '</td><td>' + esc(row.vaName) + '</td><td>' + esc(row.topic) + '</td><td>' + esc(row.discussion) + '</td><td>' + esc(row.action) + '</td></tr>';
-    }).join('');
-    return '<h1>Feedback Sessions</h1><p class="lead">Date, topic, discussion, and action. A closed week does not freeze these.</p><div class="card tw"><table><thead><tr><th>Date</th><th>VA</th><th>Topic</th><th>Discussion</th><th>Action</th></tr></thead><tbody>' + body + '</tbody></table></div>';
-  }
-
-  async function viewReports() {
-    var evals = await CNRStore.listEvaluations();
-    var counts = {};
-    CNRLabels.STATUSES.forEach(function (status) { counts[status] = 0; });
-    cache.vas.forEach(function (va) { counts[va.status] = (counts[va.status] || 0) + 1; });
-    var chips = CNRLabels.STATUSES.map(function (status) { return kpi(status, counts[status] || 0); }).join('');
-    var closed = evals.filter(function (ev) { return ev.status === 'closed'; });
-    var body = closed.length ? closed.map(function (ev) {
-      return '<tr class="cl" data-href="' + profileHash(ev.vaId, '', ev.weekStart) + '"><td>' + esc(ev.vaName) + '</td><td>' + esc(CNRDates.formatLong(ev.weekStart)) + '</td><td>' + esc(points(ev.overall)) + '</td><td>' + esc(outcomeLabel(ev.outcome)) + '</td></tr>';
-    }).join('') : '<tr><td colspan="4" class="mu">No closed weeks yet.</td></tr>';
-    return '<h1>Reports</h1><div class="kpis">' + chips + '</div><div class="card tw"><h2>Closed weeks</h2><table><thead><tr><th>VA</th><th>Week</th><th>KPI</th><th>Result</th></tr></thead><tbody>' + body + '</tbody></table></div>';
-  }
-
   function latestByVa(evals) {
     var map = {};
     evals.forEach(function (ev) {
@@ -878,52 +812,7 @@
       var err = state.renaming === batch.id && state.renameError ? '<p class="rename-err">' + esc(state.renameError) + '</p>' : '';
       return '<article class="bc"><div class="batchline">' + title + '</div><p class="idtag">' + esc(batch.id) + '</p><p>' + vas.length + ' VAs</p><p class="sm">Attendance ' + esc(pct(att)) + ' · QA ' + esc(points(avg(qas))) + ' · KPI ' + esc(points(avg(kpis))) + '</p>' + err + '</article>';
     }).join('');
-    return '<h1>Batches</h1><p class="lead">Rename a batch in place. Reports and VA cards pick up the new name. The id does not change.</p>' + form + '<div class="g3">' + cards + '</div>';
-  }
-
-  async function viewTraining(report) {
-    var packs = await Promise.all([CNRStore.listBatches(), CNRStore.listAttendance(), CNRStore.listEvaluations(), CNRStore.getSettings()]);
-    var batches = packs[0];
-    var attendance = packs[1];
-    var evals = packs[2];
-    var passMark = Number(packs[3].passMark);
-    var title = report ? 'Training Reports' : 'Training Results';
-    if (!batches.length) return '<h1>' + title + '</h1><div class="card"><p class="mu">No batches yet. Add a batch when you add a VA.</p></div>';
-    var blocks = batches.map(function (batch) {
-      var vas = cache.vas.filter(function (va) { return va.batchId === batch.id; });
-      var ids = {};
-      vas.forEach(function (va) { ids[va.id] = true; });
-      var days = attendance.filter(function (row) { return ids[row.vaId]; });
-      var att = days.length ? CNRScore.weeklyAttendance(days.map(CNRScore.dailyAttendancePercent)) : null;
-      var mine = evals.filter(function (ev) { return ids[ev.vaId] && ev.status === 'closed'; });
-      var latest = latestByVa(mine);
-      var list = Object.keys(latest).map(function (id) { return latest[id]; });
-      var kpiAvg = list.length ? list.reduce(function (sum, ev) { return sum + Number(ev.overall || 0); }, 0) / list.length : null;
-      var passed = list.filter(function (ev) { return ev.passed === true; }).length;
-      var width = kpiAvg == null ? 0 : Math.max(0, Math.min(100, kpiAvg));
-      var bar = '<div class="hb"><span>' + esc(batch.name) + '</span><div class="cb"><i style="width:' + width + '%"></i><u style="left:' + passMark + '%"></u></div><b>' + esc(kpiAvg == null ? '—' : points(kpiAvg)) + '</b></div>';
-      var copy = '<p class="sm">' + vas.length + ' VAs · Attendance ' + esc(pct(att)) + ' · ' + passed + ' of ' + list.length + ' closed weeks met the pass mark</p>';
-      return report ? bar + copy : '<article class="card"><h2>' + esc(batch.name) + '</h2>' + bar + copy + '</article>';
-    }).join('');
-    var intro = '<h1>' + title + '</h1><p class="lead">Batch averages use closed weekly KPIs. The mark on each bar is the pass mark (' + esc(String(passMark)) + ').</p>';
-    return report ? intro + '<div class="card">' + blocks + '</div>' : intro + blocks;
-  }
-
-  async function viewQa() {
-    var evals = await CNRStore.listEvaluations();
-    var latest = latestByVa(evals);
-    if (!cache.vas.length) {
-      var add = can('manage_va') ? '<button type="button" data-action="add-va">+ Add VA</button>' : '';
-      return '<h1>QA Sheet</h1><div class="card emptyqa"><h2>No one is on the QA sheet yet</h2><p>Add a VA after training. Everyone on the roster is listed here.</p>' + add + '</div>';
-    }
-    var rows = cache.vas.map(function (va) {
-      var ev = latest[va.id];
-      var qaText = ev && ev.qaScore != null ? points(ev.qaScore) : '—';
-      var qaTone = qaClass(ev && ev.qaScore);
-      var qaCell = qaTone ? '<span class="' + (qaTone === 'ok' ? 'qa-pass' : 'qa-fail') + '">' + esc(qaText) + '</span>' : esc(qaText);
-      return '<tr class="cl" data-href="' + profileHash(va.id, 'qa', ev ? ev.weekStart : '') + '"><td><b>' + esc(va.fullName) + '</b><small>' + esc(va.clientName || '') + '</small></td><td>' + esc(va.batchName || '—') + '</td><td>' + badge(va.status) + '</td><td>' + esc(ev ? CNRDates.formatLong(ev.weekStart) : '—') + '</td><td>' + qaCell + '</td><td>' + esc(ev && ev.overall != null ? points(ev.overall) : (ev ? 'In progress' : '—')) + '</td><td>' + esc(ev && ev.status === 'closed' ? outcomeLabel(ev.outcome) : (ev ? 'Open' : '—')) + '</td></tr>';
-    }).join('');
-    return '<h1>QA Sheet</h1><p class="lead">Every VA is listed. QA scores are entered on the VA profile for the open week.</p><div class="card tw"><table><thead><tr><th>VA</th><th>Batch</th><th>Status</th><th>Week</th><th>QA</th><th>KPI</th><th>Result</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+    return '<h1>Batches</h1><p class="lead">Rename a batch in place. VA cards pick up the new name. The id does not change.</p>' + form + '<div class="g3">' + cards + '</div>';
   }
 
   async function viewSettings() {
