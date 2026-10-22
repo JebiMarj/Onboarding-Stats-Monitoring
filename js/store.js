@@ -606,40 +606,6 @@
     });
   };
 
-  api.listCoaching = async function () {
-    if (mock) {
-      var names = {};
-      state.vas.forEach(function (va) { names[va.id] = va.fullName; });
-      return state.coaching.map(function (row) {
-        return {
-          id: row.id,
-          vaId: row.vaId,
-          vaName: names[row.vaId] || '',
-          sessionDate: row.sessionDate,
-          topic: row.topic,
-          discussion: row.discussion,
-          action: row.action,
-          createdAt: row.createdAt
-        };
-      }).sort(function (a, b) { return (a.sessionDate + a.createdAt) < (b.sessionDate + b.createdAt) ? 1 : -1; });
-    }
-    var res = await sb().from('coaching_sessions').select('id, va_id, session_date, topic, discussion, action, created_at, va_profiles(full_name)').order('session_date', { ascending: false });
-    if (res.error) raise(res.error);
-    return (res.data || []).map(function (row) {
-      var va = one(row.va_profiles);
-      return {
-        id: row.id,
-        vaId: row.va_id,
-        vaName: va ? va.full_name : '',
-        sessionDate: row.session_date,
-        topic: row.topic,
-        discussion: row.discussion,
-        action: row.action,
-        createdAt: row.created_at
-      };
-    });
-  };
-
   api.listEvaluations = async function () {
     if (mock) {
       var byVa = {};
