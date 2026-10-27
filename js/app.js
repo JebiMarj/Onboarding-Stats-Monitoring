@@ -14,8 +14,6 @@
   var ICONS = {
     board: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     search: '<circle cx="11" cy="11" r="6.5"/><path d="m20 20-3.2-3.2"/>',
-    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4 17 7M7 17l-1.6 1.6"/>',
-    moon: '<path d="M20 14.8A8.2 8.2 0 1 1 9.2 4 6.4 6.4 0 0 0 20 14.8z"/>',
     caret: '<path d="m6 9 6 6 6-6"/>',
     menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     close: '<path d="M6 6l12 12M18 6 6 18"/>',
@@ -155,21 +153,6 @@
     return '<svg class="' + (cls || '') + '" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
   }
 
-  function setTheme(theme) {
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.style.colorScheme = theme;
-    try {
-      localStorage.setItem('cnr_theme', theme);
-      localStorage.setItem('cnr-theme', theme);
-    } catch (err) { /* private mode */ }
-    var btn = document.getElementById('theme-btn');
-    if (!btn) return;
-    var dark = theme === 'dark';
-    btn.innerHTML = dark ? icon('sun') : icon('moon');
-    btn.setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
-    btn.title = btn.getAttribute('aria-label');
-  }
-
   function storedNavMode() {
     try { return localStorage.getItem('cnr-nav') === 'compact' ? 'compact' : 'full'; }
     catch (err) { return 'full'; }
@@ -208,7 +191,6 @@
       + '<nav class="nav-links" aria-label="Main">' + MENUS.map(menuHtml).join('') + '</nav>'
       + '<div class="nav-tools"><button type="button" class="sbtn" id="open-pal" aria-label="Search VAs">' + icon('search')
       + '<span class="nav-label">Search</span><kbd>/</kbd></button>'
-      + '<button type="button" class="icon-btn" id="theme-btn" aria-label="Switch to dark mode"></button>'
       + '<div class="menu user" data-menu="user"><button type="button" class="nav-btn" id="user-menu" data-menu-btn="user" aria-haspopup="true" aria-expanded="false">'
       + '<span class="av s">' + esc(initials(user.name)) + '</span><span class="user-meta"><span class="user-name">' + esc(user.name) + '</span>'
       + '<span class="b" id="signed-role">' + esc(CNRLabels.roleLabel(user.role)) + '</span></span></button>'
@@ -268,10 +250,6 @@
     if (menuBtn) {
       var drawer = menuBtn.closest('.nav-links') && document.getElementById('nav').classList.contains('open');
       if (!drawer) toggleMenu(menuBtn.getAttribute('data-menu-btn'));
-      return;
-    }
-    if (event.target.closest('#theme-btn')) {
-      setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
       return;
     }
     if (event.target.closest('#open-pal')) {
@@ -347,7 +325,6 @@
     app.innerHTML = shell(me());
     applyNavMode(storedNavMode());
     document.getElementById('nav').addEventListener('click', onNavClick);
-    setTheme(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
     var page = document.getElementById('page');
     page.addEventListener('click', onClick);
     page.addEventListener('submit', onSubmit);
@@ -620,11 +597,12 @@
 
   function profileHead(va, ev) {
     var edit = can('manage_va') ? '<button type="button" class="g s" data-action="edit-va">Edit</button>' : '';
+    var remove = can('delete_va') ? '<button type="button" class="danger s" data-action="delete-va">Delete VA</button>' : '';
     var menu = '';
     if (can('manage_va')) {
       menu = '<div class="statuspop" id="statuspop"><button type="button" class="g" id="status-menu" data-action="toggle-status" aria-haspopup="true" aria-expanded="false">Status</button><div class="pop" id="status-panel" hidden>' + statusForm(va) + '<button type="button" class="g" data-action="show-history">Movement history</button></div></div>';
     }
-    return '<p class="back"><a href="#/board">← Board</a></p><div class="sheethead"><div class="headrow"><h1><span class="av">' + esc(initials(va.fullName)) + '</span>' + esc(va.fullName) + ' ' + badge(va.status) + '</h1><div class="head-actions">' + edit + menu + '</div></div><p class="lead">' + esc([va.clientName, va.businessName, va.batchName].filter(Boolean).join(' · ') || 'No client yet') + '</p>' + weekPicker(va, ev) + '</div>';
+    return '<p class="back"><a href="#/board">← Board</a></p><div class="sheethead"><div class="headrow"><h1><span class="av">' + esc(initials(va.fullName)) + '</span>' + esc(va.fullName) + ' ' + badge(va.status) + '</h1><div class="head-actions">' + edit + menu + remove + '</div></div><p class="lead">' + esc([va.clientName, va.businessName, va.batchName].filter(Boolean).join(' · ') || 'No client yet') + '</p>' + weekPicker(va, ev) + '</div>';
   }
 
   async function viewProfile(route) {
@@ -1057,6 +1035,7 @@
       }
       if (name === 'show-history') return navigate(profileHash(route.vaId, 'history', route.week));
       if (name === 'edit-va') return openVaModal(cache.current);
+      if (name === 'delete-va') return openDeleteVaModal(cache.current);
       if (name === 'rename') {
         state.renaming = action.dataset.id;
         state.renameError = '';
@@ -1586,8 +1565,24 @@
 
   async function onModalSubmit(event) {
     var form = event.target;
-    if (!form || (form.id !== 'va-form' && form.id !== 'import-form' && form.id !== 'att-form' && form.id !== 'qa-modal' && form.id !== 'wbr-form' && form.id !== 'comp-modal' && form.id !== 'coach-modal')) return;
+    if (!form || (form.id !== 'va-form' && form.id !== 'import-form' && form.id !== 'att-form' && form.id !== 'qa-modal' && form.id !== 'wbr-form' && form.id !== 'comp-modal' && form.id !== 'coach-modal' && form.id !== 'delete-va-form')) return;
     event.preventDefault();
+    if (form.id === 'delete-va-form') {
+      var deleteErr = document.getElementById('mod-err');
+      var confirmBtn = document.getElementById('delete-va-confirm');
+      if (deleteErr) deleteErr.textContent = '';
+      if (confirmBtn) confirmBtn.disabled = true;
+      try {
+        await CNRStore.deleteVa(form.dataset.id);
+        closeModal();
+        cache.current = null;
+        navigate('#/board', 'VA removed.');
+      } catch (ex) {
+        if (confirmBtn) confirmBtn.disabled = false;
+        if (deleteErr) deleteErr.textContent = ex.message || 'Something went wrong.';
+      }
+      return;
+    }
     if (form.id === 'att-form') return saveAttendanceModal(form);
     if (form.id === 'qa-modal') return saveQaModal(form);
     if (form.id === 'wbr-form') return saveWbrModal(form);
@@ -1703,7 +1698,28 @@
     pal.innerHTML = '';
   }
 
+  function openDeleteVaModal(va) {
+    if (!va || !can('delete_va')) return;
+    var name = va.fullName || 'this VA';
+    var mod = document.getElementById('mod');
+    mod.innerHTML = '<form class="box" id="delete-va-form" data-id="' + esc(va.id) + '" role="alertdialog" aria-modal="true" aria-labelledby="delete-va-title" aria-describedby="delete-va-copy">'
+      + '<h2 id="delete-va-title">Delete ' + esc(name) + '</h2>'
+      + '<p id="delete-va-copy">Delete <b>' + esc(name) + '</b>? This cannot be undone.</p>'
+      + '<p class="warn">This permanently removes <b>' + esc(name) + '</b> and that VA\'s related records: attendance, WBR, QA weeks, competency entries, evaluations, feedback sessions, and movement history. Records for other VAs are not changed. The batch stays.</p>'
+      + '<p id="mod-err" class="rename-err"></p>'
+      + '<div class="actions"><button type="button" class="g" data-action="cancel-modal" id="delete-va-cancel">Cancel</button>'
+      + '<button type="submit" class="danger" id="delete-va-confirm">Delete VA</button></div></form>';
+    mod.style.display = 'flex';
+    document.getElementById('delete-va-cancel').focus();
+  }
+
   async function boot() {
+    try {
+      localStorage.removeItem('cnr_theme');
+      localStorage.removeItem('cnr-theme');
+    } catch (err) { /* private mode */ }
+    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.style.colorScheme = 'light';
     if (new URLSearchParams(location.search).get('mock') === '1') sessionStorage.setItem('cnr-mock', '1');
     try {
       await CNRStore.restore();
