@@ -67,6 +67,6 @@ test('the light pink palette meets WCAG AA and dark mode is gone', () => {
     const ratio = contrast(theme[fg], theme[bg]);
     assert.ok(ratio >= 4.5, theme[fg] + ' on ' + theme[bg] + ' is ' + ratio.toFixed(2));
   }
-  assert.equal(theme['--bg'].toLowerCase(), '#fff1f5');
+  assert.equal(theme['--bg'].toLowerCase(), '#fde7ef');
   assert.equal(theme['--card'].toLowerCase(), '#ffffff');
 });
