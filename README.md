@@ -2,7 +2,7 @@
 
 Static site for weekly onboarding QA. There is no build step. Supabase provides Postgres and email/password sign-in. Row Level Security enforces roles.
 
-The screen uses the earlier rose and stone palette, with a top navigation bar across the page. Weekly attendance by minutes, competency comments, coaching actions, the KPI, and endorsement use that layout. The database underneath is the current schema.
+The screen is a single light pink theme, with a top navigation bar across the page. Weekly attendance by minutes, competency comments, coaching actions, the KPI, and endorsement use that layout. The database underneath is the current schema.
 
 The hosted project already has that schema, with one admin profile and no VA rows. Do not run the reset again, and do not import old VA records. Later schema changes live in `supabase/migrations` and stay unapplied until they are approved. The SQL steps below are only for a brand-new database.
 
@@ -54,14 +54,16 @@ Anyone who can sign in can read. The database enforces writes. The screen hides 
 
 | Role | Can change |
 | --- | --- |
-| Admin | Everything, including settings, roles, and Endorse |
-| Onboarder | VA profiles, batches, attendance, WBR, competencies, coaching, and weekly evaluations |
+| Admin | Everything, including settings, roles, Endorse, and deleting a VA |
+| Onboarder | VA profiles, batches, attendance, WBR, competencies, coaching, and weekly evaluations. Not deleting a VA |
 | QA | QA score, evaluation-form link, and call-recording link |
 | Viewer | Nothing. This is the default for a new account |
 
 Onboarders can update every VA, not only the ones they onboard. That keeps a one-person team from having to reassign records. An onboarder cannot edit a QA score. QA cannot insert a weekly evaluation.
 
 An admin sets Endorsed from the Status menu when the current status is Ready for endorsement. That records who did it and when. Resigned and EOC are in the same menu for an admin or an onboarder, and those choices ask for confirmation.
+
+Deleting a VA is admin only. The button is on that VA's profile. The dialog names the VA and says the delete is permanent and also removes that VA's attendance, WBR, QA weeks, competency entries, evaluations, feedback sessions, and movement history. The database enforces the role. `delete_va()` deletes that one profile. Related rows follow the foreign keys, including a closed week, finalized attendance, and a leftover `weekly_wbr` row when that table is still there. Other VAs and the batch stay. The board reloads its counts from the remaining profiles. Until `supabase/migrations/20261027_delete_va.sql` is applied, the hosted project rejects the delete. Preview mode (`?mock=1`) does not need that file.
 
 ## Weekly flow
 
@@ -128,17 +130,17 @@ Automated checks, no install and no network:
 node --test
 ```
 
-That covers attendance minute math, a full-day absence, the weekly average, conversion, rescaling, the weight total, and the 80 / 79.99 pass-mark boundary, plus the in-memory weekly flow and the light/dark color pairs.
+That covers attendance minute math, a full-day absence, the weekly average, conversion, rescaling, the weight total, and the 80 / 79.99 pass-mark boundary, plus the in-memory weekly flow, admin-only VA delete, and the light pink color pairs.
 
 `test/sql.test.js` loads `supabase/schema.sql` in a local Postgres (via `@electric-sql/pglite`) and checks that the SQL snapshot matches `js/score.js`, including role denials. It skips when that package is not installed. There is no `package.json` on purpose, so Render will not try to build the site. Do not point that test at the hosted project.
 
 ## Theme
 
-The page follows the system light or dark setting. Dark mode / Light mode saves the choice in this browser under `cnr_theme` and `cnr-theme`. The navigation bar can collapse to icons. That choice is saved under `cnr-nav`.
+The page is light pink only. There is no dark mode and no theme switch. A saved `cnr_theme` or `cnr-theme` value is cleared when the page opens. The navigation bar can collapse to icons. That choice is saved under `cnr-nav`.
 
 ## Screens
 
-The top bar holds Onboarding (Board, Batches). Search, the theme control, and the account menu sit on the right. Settings and sign out are in the account menu. A narrow window folds the menu into one menu button.
+The top bar holds Onboarding (Board, Batches). Search and the account menu sit on the right. Settings and sign out are in the account menu. A narrow window folds the menu into one menu button. An admin's VA profile has Delete VA. Other roles do not.
 
 The board counts are On the Roster, Number of Batches, Onboarding, Endorsed to Operations, and Resigned/Terminated. Onboarding includes Continue onboarding and Ready for endorsement. Resigned/Terminated includes Resigned and EOC. Each count filters the list under it. Number of Batches opens the Batches page. The list opens on Onboarding. The + button adds one VA or imports a CSV. The template is a header row only. The import shows a preview and does not save until every row is valid. A card opens the profile. Search is the control on the right of the bar, and the `/` key.
 
@@ -155,5 +157,7 @@ The profile is a header plus eight cards: Attendance, QA score, WBR, Tool naviga
 `supabase/migrations/20261022_manual_endorsed.sql` would let an admin or onboarder set Endorsed from any current status. It is not part of `schema.sql`, and the app does not use that broader rule.
 
 `supabase/migrations/20261022_dated_entries.sql` adds `weekly_qa.period_start` and `weekly_qa.period_end`, and a `competency_entries` table for dated competency scores. It is not applied. `schema.sql` includes the same shape so a new database and the local test match. The hosted database does not, until this file is approved and run.
+
+`supabase/migrations/20261027_delete_va.sql` lets an admin delete one VA. It grants `DELETE` on `va_profiles` to `authenticated` and adds policy `va_profiles_delete` (`app_role() = 'admin'`). It adds `delete_va(uuid)`, which checks that role and deletes that profile. Child tables cascade. For that statement only, user triggers on tables that reference `va_profiles` or `weekly_evaluations` are disabled and then enabled, so a closed week, finalized attendance, or a leftover `weekly_wbr` row does not block the delete and does not change the freeze rules for later edits. It adds `status_history_delete` for an admin while `cnr.deleting_va` is that VA, and it widens `weekly_evaluations_delete` so an admin can remove a closed week only in that same case. Open-week deletes stay admin-only. It does not replace `freeze_closed_attendance()`. A direct `DELETE FROM va_profiles` can still fail on an older freeze function; the screen calls `delete_va()`. This file does not need the other 20261022 migrations applied first.
 
 Do not apply these files until they are approved. `supabase/schema.sql` matches a fresh install and is not a migration for the database that is already live.

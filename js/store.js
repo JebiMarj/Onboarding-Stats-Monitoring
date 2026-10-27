@@ -496,6 +496,11 @@
       if (res.error) raise(res.error);
       return { id: input.id };
     },
+    async deleteVa(id) {
+      if (mock) return apply(function (current, actor) { return root.CNRModel.deleteVa(current, actor, { id: id }); });
+      var res = await sb().rpc('delete_va', { p_va_id: id });
+      if (res.error) raise(res.error);
+    },
     async setManualStatus(id, status) {
       if (mock) return apply(function (current, actor) { return root.CNRModel.setManualStatus(current, actor, { id: id, status: status }); });
       var res = await sb().from('va_profiles').update({ status: status }).eq('id', id);

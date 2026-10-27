@@ -8,6 +8,7 @@
   var ACTIONS = {
     view: ['admin', 'onboarder', 'qa', 'viewer'],
     manage_va: ['admin', 'onboarder'],
+    delete_va: ['admin'],
     batches: ['admin', 'onboarder'],
     attendance: ['admin', 'onboarder'],
     wbr: ['admin', 'onboarder'],

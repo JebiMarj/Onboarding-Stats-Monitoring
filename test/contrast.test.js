@@ -31,31 +31,42 @@ function block(css, selector) {
   return vars;
 }
 
-test('light and dark color pairs meet WCAG AA', () => {
-  const css = fs.readFileSync(path.join(__dirname, '..', 'app.css'), 'utf8');
-  const light = block(css, ':root');
-  const dark = Object.assign({}, light, block(css, ':root[data-theme="dark"]'));
+test('the light pink palette meets WCAG AA and dark mode is gone', () => {
+  const root = path.join(__dirname, '..');
+  const css = fs.readFileSync(path.join(root, 'app.css'), 'utf8');
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(root, 'js', 'app.js'), 'utf8');
+  assert.equal(css.includes('[data-theme="dark"]'), false);
+  assert.equal(css.includes('prefers-color-scheme'), false);
+  assert.equal(html.includes('prefers-color-scheme'), false);
+  assert.equal(html.includes('cnr_theme'), false);
+  assert.equal(app.includes('theme-btn'), false);
+  assert.equal(app.includes('Switch to dark mode'), false);
+  const theme = block(css, ':root');
   const textPairs = [
     ['--tx', '--bg'],
     ['--tx', '--card'],
     ['--tx', '--hv'],
     ['--tx', '--pri-soft'],
+    ['--tx', '--panel'],
     ['--mu', '--bg'],
     ['--mu', '--card'],
     ['--mu', '--hv'],
+    ['--mu', '--pri-soft'],
+    ['--mu', '--panel'],
     ['--pri-tx', '--pri'],
+    ['--pri-tx', '--ac'],
+    ['--pri-tx', '--bad'],
     ['--ok', '--okb'],
     ['--wn', '--wnb'],
     ['--bad', '--badb'],
     ['--side-tx', '--side'],
     ['--side-mu', '--side']
   ];
-  for (const theme of [light, dark]) {
-    for (const [fg, bg] of textPairs) {
-      const ratio = contrast(theme[fg], theme[bg]);
-      assert.ok(ratio >= 4.5, theme[fg] + ' on ' + theme[bg] + ' is ' + ratio.toFixed(2));
-    }
+  for (const [fg, bg] of textPairs) {
+    const ratio = contrast(theme[fg], theme[bg]);
+    assert.ok(ratio >= 4.5, theme[fg] + ' on ' + theme[bg] + ' is ' + ratio.toFixed(2));
   }
-  assert.ok(contrast('#ffffff', light['--ac']) >= 4.5, 'light accent button');
-  assert.ok(contrast('#1c1917', dark['--ac']) >= 4.5, 'dark accent button');
+  assert.equal(theme['--bg'].toLowerCase(), '#fff1f5');
+  assert.equal(theme['--card'].toLowerCase(), '#ffffff');
 });

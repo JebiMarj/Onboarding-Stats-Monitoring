@@ -396,6 +396,29 @@
     return { ok: true, state: next, va: va };
   }
 
+  function deleteVa(state, actor, input) {
+    var denied = gate(actor, 'delete_va');
+    if (denied) return fail(denied);
+    var id = input && input.id;
+    var next = clone(state);
+    var va = findVa(next, id);
+    if (!va) return fail('VA not found.');
+    var evalIds = {};
+    next.evaluations.forEach(function (ev) {
+      if (ev.vaId === id) evalIds[ev.id] = true;
+    });
+    next.vas = next.vas.filter(function (row) { return row.id !== id; });
+    next.attendance = (next.attendance || []).filter(function (row) { return row.vaId !== id; });
+    next.evaluations = (next.evaluations || []).filter(function (row) { return row.vaId !== id; });
+    next.qa = (next.qa || []).filter(function (row) { return !evalIds[row.evaluationId]; });
+    next.competencies = (next.competencies || []).filter(function (row) { return !evalIds[row.evaluationId]; });
+    next.wbrDays = (next.wbrDays || []).filter(function (row) { return row.vaId !== id; });
+    next.competencyEntries = (next.competencyEntries || []).filter(function (row) { return row.vaId !== id; });
+    next.coaching = (next.coaching || []).filter(function (row) { return row.vaId !== id; });
+    next.history = (next.history || []).filter(function (row) { return row.vaId !== id; });
+    return { ok: true, state: next };
+  }
+
   function setManualStatus(state, actor, input) {
     var denied = gate(actor, 'manage_va');
     if (denied) return fail(denied);
@@ -1089,6 +1112,7 @@
     renameBatch: renameBatch,
     createVa: createVa,
     updateVa: updateVa,
+    deleteVa: deleteVa,
     setManualStatus: setManualStatus,
     saveAttendance: saveAttendance,
     deleteAttendance: deleteAttendance,

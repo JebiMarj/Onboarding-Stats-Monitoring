@@ -517,3 +517,200 @@ test('Postgres formula matches the JavaScript formula and RLS enforces roles', {
   const accounts = await db.query(`select count(*)::int as n from auth.users`);
   assert.equal(accounts.rows[0].n, 5);
 });
+
+test('only an admin can delete a VA, and related rows for that VA go with them', { skip: !PGlite && 'install @electric-sql/pglite to run the schema' }, async () => {
+  const db = await boot();
+  await db.exec(fs.readFileSync(path.join(root, 'supabase/migrations/20261027_delete_va.sql'), 'utf8'));
+  const admin = await user(db, 'admin@example.com', 'admin', 'Admin');
+  const onboarder = await user(db, 'onboarder@example.com', 'onboarder', 'Onboarder');
+  const qaUser = await user(db, 'qa@example.com', 'qa', 'QA');
+  const viewer = await user(db, 'viewer@example.com', 'viewer', 'Viewer');
+
+  const batch = await asUser(db, admin, async () => {
+    const row = await db.query(`insert into public.batches (name) values ('Shared batch') returning id`);
+    return row.rows[0].id;
+  });
+
+  async function addVa(name) {
+    const row = await asUser(db, onboarder, () => db.query(
+      `insert into public.va_profiles (full_name, onboarding_start, status, batch_id)
+       values ($1, '2026-10-12', 'Onboarding', $2) returning id`,
+      [name, batch]
+    ));
+    return row.rows[0].id;
+  }
+
+  const gone = await addVa('Avery Sample');
+  const kept = await addVa('Blair Sample');
+
+  await asUser(db, onboarder, () => db.query(
+    `insert into public.attendance_days (va_id, work_date, absent, late_minutes, downtime_minutes, remarks)
+     values ($1, '2026-10-12', false, 20, 0, 'Traffic'), ($2, '2026-10-12', false, 0, 0, 'On time')`,
+    [gone, kept]
+  ));
+  await asUser(db, admin, () => db.query(
+    `update public.va_profiles set attendance_finalized_at = now() where id = $1`,
+    [gone]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `insert into public.wbr_days (va_id, work_date, total_leads, converted_leads)
+     values ($1, '2026-10-13', 10, 4), ($2, '2026-10-13', 5, 1)`,
+    [gone, kept]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `insert into public.coaching_sessions (va_id, session_date, topic, discussion, action)
+     values
+       ($1, '2026-10-15', 'Opening', 'Name first.', 'Use the script.'),
+       ($2, '2026-10-15', 'Close', 'Asked for the rate.', 'Keep asking.')`,
+    [gone, kept]
+  ));
+  const goneWeek = await asUser(db, onboarder, async () => {
+    const opened = await db.query(
+      `insert into public.weekly_evaluations (va_id, week_start) values ($1, '2026-10-12') returning id`,
+      [gone]
+    );
+    return opened.rows[0].id;
+  });
+  const keptWeek = await asUser(db, onboarder, async () => {
+    const opened = await db.query(
+      `insert into public.weekly_evaluations (va_id, week_start) values ($1, '2026-10-12') returning id`,
+      [kept]
+    );
+    return opened.rows[0].id;
+  });
+  await asUser(db, qaUser, () => db.query(
+    `insert into public.weekly_qa (evaluation_id, score, form_url, period_start)
+     values ($1, 91, 'https://example.com/avery', '2026-10-12'), ($2, 82, 'https://example.com/blair', '2026-10-12')`,
+    [goneWeek, keptWeek]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `insert into public.competency_entries (va_id, competency, entry_date, score, comment)
+     values ($1, 'tool_navigation', '2026-10-14', 88, 'Dialer'), ($2, 'communication', '2026-10-14', 77, 'Clear')`,
+    [gone, kept]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `select public.close_weekly_evaluation($1, 'Below the mark.', 'Review the call.')`,
+    [goneWeek]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `select public.close_weekly_evaluation($1, 'Below the mark.', 'Review the call.')`,
+    [keptWeek]
+  ));
+
+  await db.exec(`
+    create table public.weekly_wbr (
+      id uuid primary key default gen_random_uuid(),
+      evaluation_id uuid not null unique references public.weekly_evaluations (id) on delete cascade,
+      total_leads numeric,
+      converted_leads numeric
+    );
+    create trigger weekly_wbr_freeze
+      before delete on public.weekly_wbr
+      for each row execute function public.freeze_closed_evaluation_child();
+    alter table public.weekly_wbr enable row level security;
+    grant select, delete on public.weekly_wbr to authenticated;
+    create policy weekly_wbr_select on public.weekly_wbr
+      for select to authenticated
+      using (true);
+    create policy weekly_wbr_delete on public.weekly_wbr
+      for delete to authenticated
+      using (public.app_role() in ('admin', 'onboarder'));
+  `);
+  await db.query(
+    `insert into public.weekly_wbr (evaluation_id, total_leads, converted_leads) values ($1, 10, 4), ($2, 5, 1)`,
+    [goneWeek, keptWeek]
+  );
+  await expectThrow(
+    asUser(db, admin, () => db.query(`delete from public.weekly_wbr where evaluation_id = $1`, [goneWeek])),
+    /closed/i
+  );
+
+  for (const person of [onboarder, qaUser, viewer]) {
+    await expectThrow(
+      asUser(db, person, () => db.query(`select public.delete_va($1)`, [gone])),
+      /Your role cannot do that/
+    );
+    await asUser(db, person, () => db.query(`delete from public.va_profiles where id = $1`, [gone]));
+  }
+  const stillBoth = await db.query(`select count(*)::int as n from public.va_profiles`);
+  assert.equal(stillBoth.rows[0].n, 2);
+
+  await asUser(db, admin, () => db.query(`select public.delete_va($1)`, [gone]));
+
+  const profiles = await db.query(`select id, full_name from public.va_profiles order by full_name`);
+  assert.deepEqual(profiles.rows.map((row) => row.full_name), ['Blair Sample']);
+  assert.equal(profiles.rows[0].id, kept);
+  const batches = await db.query(`select count(*)::int as n from public.batches`);
+  assert.equal(batches.rows[0].n, 1);
+
+  async function onlyKept(table, column) {
+    const rows = await db.query(`select ${column} as id from public.${table}`);
+    assert.ok(rows.rows.every((row) => row.id === kept), table + ' still has another VA');
+    assert.equal(rows.rows.length > 0, true, table + ' lost the kept VA');
+  }
+  await onlyKept('attendance_days', 'va_id');
+  await onlyKept('wbr_days', 'va_id');
+  await onlyKept('coaching_sessions', 'va_id');
+  await onlyKept('competency_entries', 'va_id');
+  await onlyKept('weekly_evaluations', 'va_id');
+  await onlyKept('status_history', 'va_id');
+  const qaRows = await db.query(
+    `select e.va_id from public.weekly_qa q join public.weekly_evaluations e on e.id = q.evaluation_id`
+  );
+  assert.deepEqual(qaRows.rows.map((row) => row.va_id), [kept]);
+  const wbr = await db.query(`select evaluation_id from public.weekly_wbr`);
+  assert.deepEqual(wbr.rows.map((row) => row.evaluation_id), [keptWeek]);
+
+  const disabled = await db.query(
+    `select count(*)::int as n
+     from pg_trigger t
+     join pg_class c on c.oid = t.tgrelid
+     join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public' and not t.tgisinternal and t.tgenabled = 'D'`
+  );
+  assert.equal(disabled.rows[0].n, 0);
+
+  await expectThrow(
+    asUser(db, onboarder, () => db.query(
+      `update public.attendance_days set late_minutes = 9 where va_id = $1`,
+      [kept]
+    )),
+    /closed week/i
+  );
+  await expectThrow(
+    asUser(db, admin, () => db.query(`select public.delete_va($1)`, [gone])),
+    /VA not found/
+  );
+
+  const direct = await addVa('Casey Sample');
+  await asUser(db, onboarder, () => db.query(
+    `insert into public.attendance_days (va_id, work_date, absent, late_minutes, downtime_minutes)
+     values ($1, '2026-10-12', true, 0, 0)`,
+    [direct]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `insert into public.weekly_evaluations (va_id, week_start) values ($1, '2026-10-12')`,
+    [direct]
+  ));
+  const directWeek = (await db.query(
+    `select id from public.weekly_evaluations where va_id = $1`,
+    [direct]
+  )).rows[0].id;
+  await asUser(db, qaUser, () => db.query(
+    `insert into public.weekly_qa (evaluation_id, score) values ($1, 70)`,
+    [directWeek]
+  ));
+  await asUser(db, onboarder, () => db.query(
+    `select public.close_weekly_evaluation($1, 'Below the mark.', 'Review the call.')`,
+    [directWeek]
+  ));
+  await asUser(db, admin, () => db.query(
+    `update public.va_profiles set attendance_finalized_at = now() where id = $1`,
+    [direct]
+  ));
+  await asUser(db, admin, () => db.query(`delete from public.va_profiles where id = $1`, [direct]));
+  const afterDirect = await db.query(`select full_name from public.va_profiles order by full_name`);
+  assert.deepEqual(afterDirect.rows.map((row) => row.full_name), ['Blair Sample']);
+  const directQa = await db.query(`select count(*)::int as n from public.weekly_qa where evaluation_id = $1`, [directWeek]);
+  assert.equal(directQa.rows[0].n, 0);
+});

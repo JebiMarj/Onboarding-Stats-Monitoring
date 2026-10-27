@@ -485,6 +485,10 @@ begin
     target_va := new.va_id;
     target_day := new.work_date;
   end if;
+  -- delete_va() sets this so removing one VA can clear closed weeks and finalized attendance.
+  if TG_OP = 'DELETE' and current_setting('cnr.deleting_va', true) = target_va::text then
+    return old;
+  end if;
   if TG_TABLE_NAME = 'attendance_days' and exists (
     select 1 from public.va_profiles v
     where v.id = target_va
@@ -531,6 +535,13 @@ set search_path = public
 as $$
 begin
   if TG_OP = 'DELETE' then
+    if current_setting('cnr.deleting_va', true) <> '' and exists (
+      select 1 from public.weekly_evaluations e
+      where e.id = old.evaluation_id
+        and e.va_id::text = current_setting('cnr.deleting_va', true)
+    ) then
+      return old;
+    end if;
     if exists (
       select 1 from public.weekly_evaluations e
       where e.id = old.evaluation_id and e.status = 'closed'
@@ -581,6 +592,9 @@ begin
   else
     target_va := new.va_id;
     target_day := new.entry_date;
+  end if;
+  if TG_OP = 'DELETE' and current_setting('cnr.deleting_va', true) = target_va::text then
+    return old;
   end if;
   if TG_OP = 'UPDATE' and old.entry_date is distinct from new.entry_date then
     if exists (
@@ -938,6 +952,86 @@ begin
 end
 $$;
 
+-- Admin only. Deletes one VA. Child rows cascade. User triggers that freeze
+-- closed weeks or finalized attendance are turned off for this statement only,
+-- then turned back on. Foreign keys stay on, so other VAs are not touched.
+create or replace function public.delete_va(p_va_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  rec record;
+  touched text[] := array[]::text[];
+  qual text;
+begin
+  if auth.uid() is null then
+    raise exception 'Sign in required.';
+  end if;
+  if public.app_role() is distinct from 'admin' then
+    raise exception 'Your role cannot do that.';
+  end if;
+  if not exists (select 1 from public.va_profiles where id = p_va_id) then
+    raise exception 'VA not found.';
+  end if;
+
+  perform set_config('cnr.deleting_va', p_va_id::text, true);
+
+  for rec in
+    select distinct n.nspname as nsp, c.relname as rel
+    from pg_constraint fk
+    join pg_class c on c.oid = fk.conrelid
+    join pg_namespace n on n.oid = c.relnamespace
+    join pg_class parent on parent.oid = fk.confrelid
+    join pg_namespace pn on pn.oid = parent.relnamespace
+    where fk.contype = 'f'
+      and n.nspname = 'public'
+      and pn.nspname = 'public'
+      and parent.relname in ('va_profiles', 'weekly_evaluations')
+  loop
+    qual := format('%I.%I', rec.nsp, rec.rel);
+    execute format('alter table %s disable trigger user', qual);
+    touched := array_append(touched, qual);
+  end loop;
+
+  begin
+    delete from public.va_profiles where id = p_va_id;
+  exception
+    when others then
+      foreach qual in array touched loop
+        execute format('alter table %s enable trigger user', qual);
+      end loop;
+      perform set_config('cnr.deleting_va', '', true);
+      raise;
+  end;
+
+  foreach qual in array touched loop
+    execute format('alter table %s enable trigger user', qual);
+  end loop;
+  perform set_config('cnr.deleting_va', '', true);
+end
+$$;
+
+create or replace function public.va_delete_guard()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.app_role() is distinct from 'admin' then
+    raise exception 'Your role cannot do that.';
+  end if;
+  perform set_config('cnr.deleting_va', old.id::text, true);
+  return old;
+end
+$$;
+
+create trigger va_profiles_delete_guard
+  before delete on public.va_profiles
+  for each row execute function public.va_delete_guard();
+
 insert into public.app_settings (key, value)
 values (
   'kpi',
@@ -1005,7 +1099,7 @@ create policy batches_update on public.batches
   using (public.app_role() in ('admin', 'onboarder'))
   with check (public.app_role() in ('admin', 'onboarder'));
 
-grant insert, update on public.va_profiles to authenticated;
+grant insert, update, delete on public.va_profiles to authenticated;
 create policy va_profiles_insert on public.va_profiles
   for insert to authenticated
   with check (public.app_role() in ('admin', 'onboarder'));
@@ -1013,6 +1107,9 @@ create policy va_profiles_update on public.va_profiles
   for update to authenticated
   using (public.app_role() in ('admin', 'onboarder'))
   with check (public.app_role() in ('admin', 'onboarder'));
+create policy va_profiles_delete on public.va_profiles
+  for delete to authenticated
+  using (public.app_role() = 'admin');
 
 grant insert, update, delete on public.attendance_days to authenticated;
 create policy attendance_days_insert on public.attendance_days
@@ -1037,7 +1134,13 @@ create policy weekly_evaluations_insert on public.weekly_evaluations
   );
 create policy weekly_evaluations_delete on public.weekly_evaluations
   for delete to authenticated
-  using (public.app_role() = 'admin' and status = 'open');
+  using (
+    public.app_role() = 'admin'
+    and (
+      status = 'open'
+      or va_id::text = nullif(current_setting('cnr.deleting_va', true), '')
+    )
+  );
 
 grant insert, update, delete on public.weekly_qa to authenticated;
 create policy weekly_qa_insert on public.weekly_qa
@@ -1099,6 +1202,14 @@ create policy coaching_sessions_delete on public.coaching_sessions
   for delete to authenticated
   using (public.app_role() in ('admin', 'onboarder'));
 
+grant delete on public.status_history to authenticated;
+create policy status_history_delete on public.status_history
+  for delete to authenticated
+  using (
+    public.app_role() = 'admin'
+    and va_id::text = nullif(current_setting('cnr.deleting_va', true), '')
+  );
+
 grant insert, update on public.app_settings to authenticated;
 create policy app_settings_insert on public.app_settings
   for insert to authenticated
@@ -1126,15 +1237,29 @@ revoke all on function public.apply_closed_evaluation() from public;
 revoke all on function public.compute_kpi_snapshot(uuid) from public;
 revoke all on function public.close_weekly_evaluation(uuid, text, text) from public;
 revoke all on function public.endorse_va(uuid) from public;
+revoke all on function public.delete_va(uuid) from public;
+revoke all on function public.va_delete_guard() from public;
 
 grant execute on function public.app_role() to authenticated;
 grant execute on function public.ensure_profile() to authenticated;
 grant execute on function public.compute_kpi_snapshot(uuid) to authenticated;
 grant execute on function public.close_weekly_evaluation(uuid, text, text) to authenticated;
 grant execute on function public.endorse_va(uuid) to authenticated;
+grant execute on function public.delete_va(uuid) to authenticated;
+
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    execute 'revoke all on function public.delete_va(uuid) from anon';
+    execute 'revoke all on function public.va_delete_guard() from anon';
+  end if;
+end
+$$;
 
 comment on table public.profiles is
-  'Role per auth user. admin: everything. onboarder: profiles, attendance, WBR, competencies, coaching, evaluations, all VAs. qa: QA score and links. viewer: read only.';
+  'Role per auth user. admin: everything, including delete_va. onboarder: profiles, attendance, WBR, competencies, coaching, evaluations, all VAs. qa: QA score and links. viewer: read only.';
+comment on function public.delete_va(uuid) is
+  'Admin only. Permanently deletes one VA and rows that belong to that VA (attendance, WBR, QA, competencies, evaluations, coaching, movement history, and legacy weekly_wbr when that table is still present). Other VAs and batches stay.';
 comment on table public.app_settings is
   'key kpi: {passMark, weights}. Weights must sum to 100. Empty KPI sections are rescaled in compute_kpi_snapshot.';
 comment on column public.va_profiles.attendance_finalized_at is

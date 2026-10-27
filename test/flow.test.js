@@ -32,6 +32,10 @@ test('roles match the database matrix', () => {
   assert.equal(Perms.can('admin', 'users'), true);
   assert.equal(Perms.can('admin', 'undo_attendance'), true);
   assert.equal(Perms.can('onboarder', 'undo_attendance'), false);
+  assert.equal(Perms.can('admin', 'delete_va'), true);
+  assert.equal(Perms.can('onboarder', 'delete_va'), false);
+  assert.equal(Perms.can('qa', 'delete_va'), false);
+  assert.equal(Perms.can('viewer', 'delete_va'), false);
 });
 
 test('the weekly flow, batch ids, and role gates', () => {
@@ -560,4 +564,83 @@ test('dated competency entries keep the latest score and feedback can be edited'
   assert.equal(state.coaching.length, 1);
   assert.equal(state.coaching[0].topic, 'Follow-up');
   assert.equal(state.coaching[0].sessionDate, '2026-01-16');
+});
+
+test('an admin delete removes one VA and leaves everyone else', () => {
+  let state = fresh();
+  state = must(Model.createBatch(state, admin, { name: 'Shared batch' })).state;
+  const batchId = state.batches[0].id;
+  state = must(Model.createVa(state, onboarder, {
+    fullName: 'Avery Sample',
+    onboardingStart: '2026-10-12',
+    status: 'Onboarding',
+    batchId
+  })).state;
+  state = must(Model.createVa(state, onboarder, {
+    fullName: 'Blair Sample',
+    onboardingStart: '2026-10-12',
+    status: 'Onboarding',
+    batchId
+  })).state;
+  const gone = state.vas.find((va) => va.fullName === 'Avery Sample').id;
+  const kept = state.vas.find((va) => va.fullName === 'Blair Sample').id;
+
+  state = must(Model.saveAttendance(state, onboarder, {
+    vaId: gone, workDate: '2026-10-12', absent: false, lateMinutes: 15, downtimeMinutes: 0, remarks: 'Traffic'
+  })).state;
+  state = must(Model.saveAttendance(state, onboarder, {
+    vaId: kept, workDate: '2026-10-12', absent: false, lateMinutes: 0, downtimeMinutes: 0, remarks: 'On time'
+  })).state;
+  state = must(Model.finalizeAttendance(state, admin, { vaId: gone })).state;
+  state = must(Model.saveWbrDay(state, onboarder, {
+    vaId: gone, workDate: '2026-10-13', totalLeads: 10, convertedLeads: 4
+  })).state;
+  state = must(Model.saveWbrDay(state, onboarder, {
+    vaId: kept, workDate: '2026-10-13', totalLeads: 5, convertedLeads: 1
+  })).state;
+  state = must(Model.saveCompetencyEntry(state, onboarder, {
+    vaId: gone, competency: 'toolNavigation', entryDate: '2026-10-14', score: 88, comment: 'Dialer'
+  })).state;
+  state = must(Model.saveCompetencyEntry(state, onboarder, {
+    vaId: kept, competency: 'communication', entryDate: '2026-10-14', score: 77, comment: 'Clear'
+  })).state;
+  state = must(Model.saveQaForWeek(state, qa, {
+    vaId: gone, periodStart: '2026-10-12', periodEnd: '2026-10-16', score: 91,
+    formUrl: 'https://example.com/avery', recordingUrl: ''
+  })).state;
+  state = must(Model.addCoaching(state, onboarder, {
+    vaId: gone, sessionDate: '2026-10-15', topic: 'Opening', discussion: 'Name first.', action: 'Use the script.'
+  })).state;
+  state = must(Model.addCoaching(state, onboarder, {
+    vaId: kept, sessionDate: '2026-10-15', topic: 'Close', discussion: 'Asked for the rate.', action: 'Keep asking.'
+  })).state;
+  const keptEval = state.evaluations.find((ev) => ev.vaId === kept).id;
+  state = must(Model.saveQa(state, qa, { evaluationId: keptEval, score: 82 })).state;
+
+  assert.equal(Model.deleteVa(state, onboarder, { id: gone }).error, 'Your role cannot do that.');
+  assert.equal(Model.deleteVa(state, qa, { id: gone }).error, 'Your role cannot do that.');
+  assert.equal(Model.deleteVa(state, viewer, { id: gone }).error, 'Your role cannot do that.');
+  assert.equal(Model.deleteAttendance(state, admin, { id: state.attendance.find((row) => row.vaId === gone).id }).error, 'Attendance is finalized.');
+  assert.equal(state.vas.length, 2);
+
+  state = must(Model.deleteVa(state, admin, { id: gone })).state;
+  assert.equal(state.vas.length, 1);
+  assert.equal(state.vas[0].id, kept);
+  assert.equal(state.batches.length, 1);
+  assert.equal(state.batches[0].id, batchId);
+  assert.equal(Model.presentVa(state, gone), null);
+  assert.equal(Model.presentVa(state, kept).fullName, 'Blair Sample');
+  assert.equal(state.attendance.length, 1);
+  assert.equal(state.attendance[0].vaId, kept);
+  assert.equal(state.wbrDays.length, 1);
+  assert.equal(state.wbrDays[0].vaId, kept);
+  assert.equal(state.competencyEntries.length, 1);
+  assert.equal(state.competencyEntries[0].vaId, kept);
+  assert.equal(state.coaching.length, 1);
+  assert.equal(state.coaching[0].vaId, kept);
+  assert.ok(state.evaluations.every((ev) => ev.vaId === kept));
+  assert.ok(state.qa.every((row) => state.evaluations.some((ev) => ev.id === row.evaluationId && ev.vaId === kept)));
+  assert.ok(state.competencies.every((row) => state.evaluations.some((ev) => ev.id === row.evaluationId && ev.vaId === kept)));
+  assert.ok(state.history.every((row) => row.vaId === kept));
+  assert.equal(Model.deleteVa(state, admin, { id: gone }).error, 'VA not found.');
 });
